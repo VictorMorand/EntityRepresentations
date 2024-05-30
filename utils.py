@@ -9,7 +9,6 @@ from importlib import reload
 from typing import List, Dict, Any
 
 
-rep_hook_name = utils.get_act_name('pos_embed')
 
 # place a hook to replace representation of "_" 
 def get_replace_with_rep_hook(reps, ind): 
@@ -85,24 +84,33 @@ def generate_from_repr( model,
         """
         inp_toks = model.to_tokens(retr_prompt, prepend_bos=prepend_bos)
         rep_idx = 1 if prepend_bos else 0
-        print(rep_idx)
+        replace_hook_name = utils.get_act_name('pos_embed')
         taskVec_idx = rep_idx + 1
         
-        taskVector = taskVector.view(1,-1)
-        b_taskVec = taskVector.repeat(repr.shape[0],1)
+        if taskVector is not None:
+            taskVector = taskVector.view(1,-1)
+            b_taskVec = taskVector.repeat(repr.shape[0],1)
         # print(b_taskVec.shape)
         # print(repr.shape)
         
         for i in range(max_tokens):
 
                 # print(inputs, targets)
-                logits = model.run_with_hooks(
-                        inp_toks,
-                        return_type = "logits",
-                        fwd_hooks=[
-                        (replace_hook_name, get_replace_with_rep_hook(repr, rep_idx)), # replace '_' by the subject Representation
-                        (replace_hook_name, get_replace_with_rep_hook(b_taskVec, taskVec_idx)) # replace 'called' by TaskVec Representation
-                        ])
+                if taskVector is not None:
+                    logits = model.run_with_hooks(
+                            inp_toks,
+                            return_type = "logits",
+                            fwd_hooks=[
+                            (replace_hook_name, get_replace_with_rep_hook(repr, rep_idx)), # replace '_' by the subject Representation
+                            (replace_hook_name, get_replace_with_rep_hook(b_taskVec, taskVec_idx)) # replace 'called' by TaskVec Representation
+                            ])
+                else:
+                    logits = model.run_with_hooks(
+                            inp_toks,
+                            return_type = "logits",
+                            fwd_hooks=[
+                            (replace_hook_name, get_replace_with_rep_hook(repr, rep_idx)), # replace '_' by the subject Representation
+                            ])
 
                 final_logits =  logits[0,-1,:] #extract logits for last token 
 
