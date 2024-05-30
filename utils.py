@@ -171,18 +171,20 @@ class WebNLGDataset(Dataset):
         except :
             return None
         
-    def augmentDataset(self, model, hook_name, batch_size):
+    def augment_with_repr(self, model, layer, batch_size):
         """
         augment the dataset with extracted representations in given model at given hook
         Args:
             model: HookedTransformer model to extract representations from
-            hook_name: name of the hook to extract representations from
+            layer: layer at which to retreive the representations
             batch_size: batch size for inference
         """
         new_data = {}
         prepend_bos = True
         dataloader = DataLoader(self.data, batch_size=batch_size, shuffle=False)
         eos_tok_str = model.tokenizer.eos_token
+        hook_name = utils.get_act_name('resid_post', layer=layer)
+
 
         with torch.no_grad():
             for batch in tqdm(dataloader):
