@@ -84,7 +84,7 @@ def generate_from_repr( model,
         """
         inp_toks = model.to_tokens(retr_prompt, prepend_bos=prepend_bos)
         rep_idx = 1 if prepend_bos else 0
-        replace_hook_name = utils.get_act_name('pos_embed')
+        replace_hook_name = utils.get_act_name('embed')
         taskVec_idx = rep_idx + 1
         
         if taskVector is not None:
@@ -135,16 +135,18 @@ def generate_from_repr( model,
 ############################## DATASETS ##############################
 
 class WebNLGDataset(Dataset):
-    def __init__(self, data, max_length=512):
+    def __init__(self, data, max_ent_length=40, max_length=512):
         """WebNLG dataset class
         Args:
             data: list of WebNLG items
+            max_ent_length: filter entities whose span is bigger than this.
             max_length: maximum length of the text
         """
         self.max_length = max_length
-        self.data = [self.extract_from_item(it) for it in data]
-        self.data = [it for it in self.data if it is not None]
-        
+        self.max_ent_length = max_ent_length
+        self.data = []
+        for it in data:
+            self.data += self.extract_from_item(it)
         # finally add index
         for i, item in enumerate(self.data):
             item["id"] = i
@@ -160,16 +162,35 @@ class WebNLGDataset(Dataset):
         
     def extract_from_item(self, item):
         """ Extracts the entity and text from a WebNLG item
+        Args:
+            item: a dictionary with keys 'modified_triple_sets' and 'lex'
+        returns:
+        a list of dictionaries with keys 'entity' and 'text'
         """
-        try :
-            entity = item["original_triple_sets"]["otriple_set"][0][0].split('|')[0].replace('_',' ')
-            if entity[-1] == ' ': entity = entity[:-1]
-            return { 
-                "text" : item["lex"]["text"][0] + ' ' + entity,
-                "entity" : entity,
-            }
-        except :
-            return None
+        # try :
+        def clean_entity(entity):
+            return entity.replace('"','').replace('_',' ').split(' (')[0]
+        # Extract entities
+        rels = item["modified_triple_sets"]["mtriple_set"][0]
+        entities = set()
+        for rel in rels:
+            ents = rel.split(' | ')
+            ents.pop(1)
+            for ent in ents:
+                entities.update([clean_entity(ent)])
+        # filter too big entities
+        entities = [ent for ent in entities if len(ent) <= self.max_ent_length]
+        res = []
+        texts = item["lex"]["text"]
+        if not len(texts) or not len(ent): return []
+
+        for i, ent in enumerate(entities):
+            res.append({
+                "entity" : ent,
+                "text" :  texts[i%len(texts)] + ' ' + ent,
+            })
+
+        return res
         
     def augment_with_repr(self, model, layer, batch_size):
         """
