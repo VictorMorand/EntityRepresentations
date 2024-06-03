@@ -1,6 +1,8 @@
 ### Author: Victor Morand
 ### this script 
 
+import logging
+logging.basicConfig(level=logging.DEBUG)
 import transformer_lens as tl 
 from transformer_lens import HookedTransformer
 from experimaestro import Config, Task, Param, experiment
@@ -74,6 +76,7 @@ class LearnLabelExtractor(Task):
         """Called when this task is run"""
         
         ################ Model ################
+        logging.info(f"Loading model {self.model_name} ...")
         model = HookedTransformer.from_pretrained(self.model_name)
         model.eval()
         dim = model.QK.shape[-1]
@@ -89,19 +92,20 @@ class LearnLabelExtractor(Task):
             dataset["test"] = [item for item in dataset["test"] if item["category"] not in cat]
 
         # Create dataset instances
+        logging.info("loading dataset ...")
         train_dataset = utils.WebNLGDataset(dataset['train'], max_ent_length=self.max_ent_length)
         test_dataset = utils.WebNLGDataset(dataset['test'], max_ent_length=self.max_ent_length)
         
-        print("loading dataset done !")
-        print("train length:", len(train_dataset))
-        print("test length:", len(test_dataset))
-        print("ex sample:", train_dataset[np.random.randint(len(train_dataset))])
+        logging.info("loading dataset done !")
+        logging.info(f"train length: {len(train_dataset)}")
+        logging.info(f"test length: {len(test_dataset)}")
+        logging.debug(f"ex sample: {train_dataset[np.random.randint(len(train_dataset))]}")
 
-        print("Augmenting Train set with subject representations ... ")
+        logging.info("Augmenting Train set with subject representations ... ")
         train_dataset.augment_with_repr(model, self.layer, batch_size=self.batch_size)
-        print("Augmenting Test set with subject representations ... ")
+        logging.info("Augmenting Test set with subject representations ... ")
         test_dataset.augment_with_repr(model, self.layer, batch_size=self.batch_size)
-        print("Extraction of subjects representatons Done !\n")
+        logging.info("Extraction of subjects representatons Done !\n")
 
         ################ TRAINING ################
 
@@ -163,7 +167,7 @@ class LearnLabelExtractor(Task):
 
             losses.append(m_loss / b_count)
             accs.append(eval_model(model,TaskVec,test_loader=test_dataloader))
-            print(f" Epoch {len(losses)}, Language modeling loss: {losses[-1]:.3f}, Test Acc: {accs[-1]:.3f}")
+            logging.info(f" Epoch {len(losses)}, Language modeling loss: {losses[-1]:.3f}, Test Acc: {accs[-1]:.3f}")
 
         fileName = f'TaskVec_{self.model_name}_l{self.layer}_e{len(losses)}.pth'
         torch.save(TaskVec, fileName) 
