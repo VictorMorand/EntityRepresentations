@@ -179,7 +179,9 @@ class WebNLGDataset(Dataset):
             for ent in ents:
                 entities.update([clean_entity(ent)])
         # filter too big entities
-        entities = [ent for ent in entities if len(ent) <= self.max_ent_length]
+        entities = [ent for ent in entities if 
+                    (len(ent) <= self.max_ent_length and 
+                     any(c.isalpha() for c in ent))]
         res = []
         texts = item["lex"]["text"]
         if not len(texts) or not len(ent): return []
