@@ -1,0 +1,13 @@
+id: label_extractor
+title: "Label Extractor"
+description: "Debug onfiguration for the label extraction experiment"
+
+# Uses experiment.py
+file: LabelExtractor
+
+# Just debugging
+epochs: 1
+
+# Experimental parameters
+layers: [3, 5]
+model_name: "gpt2-small"
