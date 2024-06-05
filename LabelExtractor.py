@@ -77,6 +77,7 @@ class LearnLabelExtractor(Task):
         """Called when this task is run"""
         
         ################ Model ################
+        logging.info(f"Loading model {self.model_name} ...")
         model = HookedTransformer.from_pretrained(self.model_name)
         model.eval()
         dim = model.QK.shape[-1]
@@ -92,6 +93,7 @@ class LearnLabelExtractor(Task):
             dataset["test"] = [item for item in dataset["test"] if item["category"] not in cat]
 
         # Create dataset instances
+        logging.info("loading dataset ...")
         train_dataset = utils.WebNLGDataset(dataset['train'], max_ent_length=self.max_ent_length)
         test_dataset = utils.WebNLGDataset(dataset['test'], max_ent_length=self.max_ent_length)
         
