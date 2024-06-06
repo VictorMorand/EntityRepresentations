@@ -3,6 +3,7 @@
 import logging
 from typing import List, Optional
 from experimaestro.experiments import ExperimentHelper, configuration
+from experimaestro import tag
 from experimaestro.experiments.configuration import ConfigurationBase
 from experimaestro.launchers.slurm import SlurmLauncher
 
@@ -32,6 +33,10 @@ def run( helper: ExperimentHelper, cfg: Configuration):
     logging.info(f"Launching Tasks using launcher: {gpulauncher}")
 
     for layer in cfg.layers:
-        LearnLabelExtractor(model_name=cfg.model_name, layer=layer).submit(launcher=gpulauncher)
+        LearnLabelExtractor(
+            model_name=tag(cfg.model_name), 
+            layer=tag(layer), 
+            epochs=cfg.epochs
+            ).submit(launcher=gpulauncher)
     
     

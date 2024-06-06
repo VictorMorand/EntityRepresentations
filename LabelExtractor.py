@@ -30,7 +30,7 @@ def eval_model(model, TaskVec, test_loader, first_token_only=False, prepend_bos=
     taskVec_idx = rep_idx + 1
 
     with torch.no_grad():
-        for batch in tqdm(test_loader):
+        for batch in test_loader:
             b_count += 1
             # print(st(batch).replace("', ", "'\n"))
             # prompts = batch["prompt"]
@@ -143,7 +143,7 @@ class LearnLabelExtractor(Task):
         for epoch in range(self.epochs):
             b_count = 0
             m_loss = 0
-            for batch in tqdm(train_dataloader):
+            for batch in train_dataloader:
                 b_count += 1
                 
                 entities = batch["entity"]
@@ -186,4 +186,3 @@ class LearnLabelExtractor(Task):
 
         fileName = f'TaskVec_{self.model_name}_l{self.layer}_e{len(losses)}.pth'
         torch.save(TaskVec, fileName) 
-                

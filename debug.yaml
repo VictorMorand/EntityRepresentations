@@ -9,5 +9,5 @@ file: experiment
 epochs: 10
 
 # Experimental parameters
-layers: [4, 5, 10, 12]
-model_name: "gpt2-small" # 12 Transformer layers
+model_name: "gpt2-small" # 12 (0-11) Transformer layers
+layers: [4, 5, 10, 11]
