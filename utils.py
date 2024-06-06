@@ -169,7 +169,7 @@ class WebNLGDataset(Dataset):
         """
         # try :
         def clean_entity(entity):
-            return entity.replace('"','').replace('_',' ').split(' (')[0]
+            return entity.replace('"','').replace('_',' ').replace('  ',' ').split(' (')[0]
         # Extract entities
         rels = item["modified_triple_sets"]["mtriple_set"][0]
         entities = set()
@@ -184,7 +184,7 @@ class WebNLGDataset(Dataset):
                      any(c.isalpha() for c in ent))]
         res = []
         texts = item["lex"]["text"]
-        if not len(texts) or not len(ent): return []
+        if not len(texts) or not len(entities): return []
 
         for i, ent in enumerate(entities):
             res.append({
@@ -205,29 +205,21 @@ class WebNLGDataset(Dataset):
         new_data = {}
         prepend_bos = True
         dataloader = DataLoader(self.data, batch_size=batch_size, shuffle=False)
-        eos_tok_str = model.tokenizer.eos_token
-        hook_name = utils.get_act_name('resid_post', layer=layer)
-
 
         with torch.no_grad():
             for batch in tqdm(dataloader):
-                # print(str(item).replace("', ", "'\n"))
                 texts = batch["text"]
-                entities = batch["entity"]
                 ids = batch["id"].detach().cpu().numpy()
-
                 #batched GPU inference
                 str_tokens = model.to_str_tokens(texts, prepend_bos=prepend_bos)
                 subj_inds = [len(toks) - 1 for toks in str_tokens]
                 tokens = model.to_tokens(texts, prepend_bos=prepend_bos, padding_side='right')
                 
                 reps = get_representation(model, tokens=tokens, token_inds=subj_inds, layer=layer)
+
                 #Augment dataset with representation and retrieval prompt
                 for i in range(len(ids)):
-                    new_data[ids[i]] = {
-                        "representation" : reps[i,:],
-                        "prompt" : '_ > ' + entities[i] + eos_tok_str
-                        }
+                    new_data[ids[i]] = {"representation" : reps[i,:],}
         
         #GPU cleanup
         del dataloader
@@ -235,3 +227,4 @@ class WebNLGDataset(Dataset):
         gc.collect()
         torch.cuda.empty_cache()
         self.data =  [item | new_data[item["id"]] for item in self.data]
+        

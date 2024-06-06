@@ -1,25 +1,26 @@
 ### Author: Victor Morand
-### this script 
+### this experiment script
 
+from typing import List, Optional
 import logging
 logging.basicConfig(level=logging.DEBUG)
 import transformer_lens as tl 
 from transformer_lens import HookedTransformer
-from experimaestro import Config, Task, Param, experiment
+from experimaestro import Config, Task, Param
+from experimaestro.experiments import ExperimentHelper, configuration
+from experimaestro.launcherfinder import find_launcher
+from experimaestro.experiments.configuration import ConfigurationBase
 from datasets import load_dataset
 import torch, gc
 from torch.utils.data import DataLoader
 import torch.nn as nn
-from tqdm import tqdm
 import numpy as np
-import click 
+from tqdm import tqdm
 from pathlib import Path
 
-#our own module
-import utils 
-
 ############# utils #############  
-from utils import get_replace_with_rep_hook
+import utils 
+# from launchers import find_launcher
 
 def eval_model(model, TaskVec, test_loader, prepend_bos=True):
     """
@@ -34,7 +35,7 @@ def eval_model(model, TaskVec, test_loader, prepend_bos=True):
     with torch.no_grad():
         for batch in tqdm(test_loader):
             b_count += 1
-            # print(str(batch).replace("', ", "'\n"))
+            # logging.info(str(batch).replace("', ", "'\n"))
             prompts = batch["prompt"]
             reps = batch["representation"].squeeze(1)
             b_taskVec = TaskVec.repeat(len(prompts),1)
@@ -48,8 +49,8 @@ def eval_model(model, TaskVec, test_loader, prepend_bos=True):
                     inputs,
                     return_type = "logits",
                     fwd_hooks=[
-                        (replace_hook_name, get_replace_with_rep_hook(reps, rep_idx)), # replace '_' by the subject Representation
-                        (replace_hook_name, get_replace_with_rep_hook(b_taskVec, taskVec_idx)) # replace 'called' by TaskVec Representation
+                        (replace_hook_name, utils.get_replace_with_rep_hook(reps, rep_idx)), # replace '_' by the subject Representation
+                        (replace_hook_name, utils.get_replace_with_rep_hook(b_taskVec, taskVec_idx)) # replace 'called' by TaskVec Representation
                         ]
                 ,)
 
@@ -68,7 +69,7 @@ class LearnLabelExtractor(Task):
     layer: Param[int]
 
     max_ent_length: Param[int] = 20
-    epochs: Param[int] = 50
+    epochs: Param[int] = 5
     lr: Param[float] = 1e-2
     batch_size: Param[int] = 32
 
@@ -97,9 +98,9 @@ class LearnLabelExtractor(Task):
         test_dataset = utils.WebNLGDataset(dataset['test'], max_ent_length=self.max_ent_length)
         
         logging.info("loading dataset done !")
-        logging.info(f"train length: {len(train_dataset)}")
-        logging.info(f"test length: {len(test_dataset)}")
-        logging.debug(f"ex sample: {train_dataset[np.random.randint(len(train_dataset))]}")
+        logging.info("train length:", len(train_dataset))
+        logging.info("test length:", len(test_dataset))
+        logging.debug("ex sample:", train_dataset[np.random.randint(len(train_dataset))])
 
         logging.info("Augmenting Train set with subject representations ... ")
         train_dataset.augment_with_repr(model, self.layer, batch_size=self.batch_size)
@@ -139,7 +140,7 @@ class LearnLabelExtractor(Task):
             m_loss = 0
             for batch in tqdm(train_dataloader):
                 b_count += 1
-                # print(str(batch).replace("', ", "'\n"))
+                # logging.info(str(batch).replace("', ", "'\n"))
                 prompts = batch["prompt"]
                 reps = batch["representation"].squeeze(1)
                 b_taskVec = TaskVec.repeat(len(prompts),1)
@@ -148,13 +149,13 @@ class LearnLabelExtractor(Task):
                 inputs = tokens[:,:]
                 targets = tokens[:,2:] #don't take the '<eos>','_' ,'called'' tokens into account
 
-                # print(inputs, targets)
+                # logging.info(inputs, targets)
                 logits = model.run_with_hooks(
                         inputs,
                         return_type = "logits",
                         fwd_hooks=[
-                            (replace_hook_name, get_replace_with_rep_hook(reps, rep_idx)), # replace '_' by the subject Representation
-                            (replace_hook_name, get_replace_with_rep_hook(b_taskVec, taskVec_idx)) # replace 'called' by TaskVec Representation
+                            (replace_hook_name, utils.get_replace_with_rep_hook(reps, rep_idx)), # replace '_' by the subject Representation
+                            (replace_hook_name, utils.get_replace_with_rep_hook(b_taskVec, taskVec_idx)) # replace 'called' by TaskVec Representation
                             ]
                     ,)
 
@@ -172,16 +173,27 @@ class LearnLabelExtractor(Task):
         fileName = f'TaskVec_{self.model_name}_l{self.layer}_e{len(losses)}.pth'
         torch.save(TaskVec, fileName) 
                 
-@click.option("--port", type=int, default=12345, help="Port for monitoring")
-@click.option("--sleeptime", type=float, default=2, help="Sleep time")
-@click.argument("workdir", type=Path)
-@click.command()
-def cli(port, workdir, sleeptime):
-    """Runs an experiment"""
-    # Sets the working directory and the name of the xp
-    with experiment(workdir, "helloworld", port=port) as xp:
-        # Submit the tasks
-        LearnLabelExtractor(model_name="gpt2-small", layer=10).submit()
 
-if __name__ == "__main__":
-    cli()
+# Launchers, here we specify what we need for a task.
+learn_launcher = find_launcher(
+    """duration=1 hours & cuda(mem=24G) * 1  & cpu(mem=400M, cores=4)"""
+)
+evaluation_launcher = find_launcher(
+    """duration=1 hours & cuda(mem=16G) * 1 & cpu(mem=2G, cores=16)"""
+)
+
+# Configuration of the whole experiment
+@configuration
+class Configuration(ConfigurationBase):
+    epochs: int = 1
+    model_name: str = "gpt2-small"
+    layers: List[int] = [2]
+
+def run(
+    helper: ExperimentHelper, cfg: Configuration):
+    logging.debug(cfg)
+    logging.debug(learn_launcher)
+
+    LearnLabelExtractor(model_name=cfg.model_name, layer=10).submit(launcher=learn_launcher)
+    
+    
