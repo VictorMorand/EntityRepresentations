@@ -3,11 +3,11 @@ title: "Label Extractor"
 description: "Debug onfiguration for the label extraction experiment"
 
 # Uses experiment.py
-file: LabelExtractor
+file: experiment
 
 # Just debugging
-epochs: 1
+epochs: 10
 
 # Experimental parameters
-layers: [3, 5]
-model_name: "gpt2-small"
+layers: [4, 5, 10, 12]
+model_name: "gpt2-small" # 12 Transformer layers
