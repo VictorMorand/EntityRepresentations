@@ -119,8 +119,7 @@ class LearnLabelExtractor(Task):
         prepend_bos = True
         # create Task Vector
         TaskVec = torch.normal(mean=0, std=1.0, size=(1,dim), requires_grad=True)
-        losses = []
-        accs = []
+        hist = []
         # TaskVec = torch.ones((1,d), requires_grad=True)
 
         for param in model.parameters():
@@ -180,9 +179,16 @@ class LearnLabelExtractor(Task):
                 optim.zero_grad()
                 m_loss += loss.item()
 
-            losses.append(m_loss / b_count)
-            accs.append(eval_model(model,TaskVec,test_loader=test_dataloader, first_token_only=self.first_token_only, prepend_bos=prepend_bos))
-            logging.info(f" Epoch {len(losses)}, Language modeling loss: {losses[-1]:.3f}, Test Acc: {accs[-1]:.3f}")
 
-        fileName = f'TaskVec_{self.model_name}_l{self.layer}_e{len(losses)}.pth'
+            m_loss = m_loss / b_count
+            acc = eval_model(model,TaskVec,test_loader=test_dataloader, first_token_only=self.first_token_only, prepend_bos=prepend_bos)
+            hist.append({"loss": m_loss, "test accuracy": acc})
+            logging.info(f" Epoch {len(hist)}, Language modeling loss: {m_loss:.3f}, Test Acc: {acc:.3f}")
+
+        # Save TaskVector and train history
+        fileName = f'TaskVec_{self.model_name}_l{self.layer}_e{len(hist)}.pth'
         torch.save(TaskVec, fileName) 
+        import json
+
+        with open('history.json', 'w') as fp:
+            json.dump(hist, fp)
