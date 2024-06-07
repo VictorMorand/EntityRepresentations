@@ -126,12 +126,12 @@ class LearnLabelExtractor(Task):
             param.requires_grad = False
 
 
+        logging.info(f"Beging Label extractor Training ...")
         rep_idx = 1 if prepend_bos else 0 
         taskVec_idx = rep_idx + 1
-        padding_tok = model.tokenizer.eos_token_id
         eos_tok_str = model.tokenizer.eos_token
         replace_hook_name = tl.utils.get_act_name('embed') #pos_embed for gpt2 ... 
-        logging.debug(f"will insert representation at hook '{replace_hook_name}'")
+        logging.info(f"will insert representation at hook '{replace_hook_name}'")
         train_dataloader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=True)
         test_dataloader = DataLoader(test_dataset, batch_size=200, shuffle=True)
         optim = torch.optim.Adam([TaskVec], lr=self.lr)
