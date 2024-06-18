@@ -11,22 +11,22 @@ from typing import List, Dict, Any
 
 
 # place a hook to replace representation of "_" 
-def get_replace_with_rep_hook(reps, ind): 
+def get_replace_with_rep_hook(reps, inds): 
     
-    def replace_with_rep(tensor, reps, ind):
+    def replace_with_rep(tensor, reps, inds):
         """replace first token with representation
         Args:
-            tensor: the act cache to modify
-            ind, the token index that we want to overwrite 
-
+            tensor: (batch, sent_len, H) the act cache to modify
+            reps tensor(batch, H) the representations to overwrite at hook
+            inds tensor(batch), the indexes that we want to overwrite in each sentence of batch 
         """
-        # print(hook.name)
-        # print("got tensor of shape", tensor.shape)
         #replace the token a ind by the given representations
-        tensor[:,ind,:] = reps
+        # tensor[torch.arange(tensor.shape[0]),inds,:] = reps # slower
+        inds_expanded = inds.unsqueeze(1).expand(-1, tensor.shape[-1]).unsqueeze(1).to(tensor.device)
+        tensor.scatter_(1, inds_expanded, reps.unsqueeze(1))
         return tensor
     
-    return lambda tensor, hook: replace_with_rep(tensor, reps, ind)
+    return lambda tensor, hook: replace_with_rep(tensor, reps, inds)
 
 
 def get_representation(model: HookedTransformer, tokens, token_inds, layer:int, verbose:bool=False ):
@@ -89,27 +89,28 @@ def generate_from_repr( model,
         
         if taskVector is not None:
             taskVector = taskVector.view(1,-1)
-            b_taskVec = taskVector.repeat(repr.shape[0],1)
+            b_taskVec = taskVector.repeat(repr.shape[0],1).cuda()
+        
+        repr = repr.cuda()
         # print(b_taskVec.shape)
         # print(repr.shape)
         
         for i in range(max_tokens):
-
                 # print(inputs, targets)
                 if taskVector is not None:
                     logits = model.run_with_hooks(
                             inp_toks,
                             return_type = "logits",
                             fwd_hooks=[
-                            (replace_hook_name, get_replace_with_rep_hook(repr, rep_idx)), # replace '_' by the subject Representation
-                            (replace_hook_name, get_replace_with_rep_hook(b_taskVec, taskVec_idx)) # replace 'called' by TaskVec Representation
+                            (replace_hook_name, get_replace_with_rep_hook(repr, torch.tensor([rep_idx]))), # replace '_' by the subject Representation
+                            (replace_hook_name, get_replace_with_rep_hook(b_taskVec, torch.tensor([taskVec_idx]))) # replace 'called' by TaskVec Representation
                             ])
                 else:
                     logits = model.run_with_hooks(
                             inp_toks,
                             return_type = "logits",
                             fwd_hooks=[
-                            (replace_hook_name, get_replace_with_rep_hook(repr, rep_idx)), # replace '_' by the subject Representation
+                            (replace_hook_name, get_replace_with_rep_hook(repr, torch.tensor([rep_idx]))), # replace '_' by the subject Representation
                             ])
 
                 final_logits =  logits[0,-1,:] #extract logits for last token 
@@ -129,8 +130,8 @@ def generate_from_repr( model,
                 inp_toks = torch.hstack((inp_toks,new_tok))
                 # stop if EOS token
                 if new_tok == model.tokenizer.eos_token_id: break
-        print(model.to_string(inp_toks))
-
+                
+        return model.to_str_tokens(inp_toks)
 
 ############################## DATASETS ##############################
 

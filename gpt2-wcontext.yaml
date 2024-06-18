@@ -1,0 +1,20 @@
+id: context_label_extractor
+title: "Label Extractor in Context"
+description: "Expermimenting how well the model can extract the label from a representation in context"
+
+# Uses experiment.py
+file: experiment
+
+epochs: 10
+lr: 1e-2
+batch_size: 40  
+logs_per_epoch: 2
+launcher: "duration=4h & cuda(mem=30G)*1 & cpu(cores=3)" #v100 JZ 
+
+# Experimental parameters
+# model_name: "gpt2-large" # 36 (0-35) layers | Need 37 Gb ??
+model_name: "gpt2-medium" # 24 (0-23) layers
+with_context: True
+layers: 
+    from: 0
+    to: 23

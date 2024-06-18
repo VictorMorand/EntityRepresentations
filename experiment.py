@@ -12,7 +12,7 @@ from experimaestro.launchers.slurm import SlurmLauncher
 from LabelExtractor import LearnLabelExtractor
 
 logging.basicConfig(level=logging.DEBUG)
-logging.getLogger().setLevel(logging.DEBUG) # in order to set experimaestro to debug
+# logging.getLogger().setLevel(logging.DEBUG) # in order to set experimaestro to debug
 
 # Launchers, here we specify what we need for a task.
 
@@ -22,18 +22,24 @@ logging.getLogger().setLevel(logging.DEBUG) # in order to set experimaestro to d
 #                               mem_per_gpu= 22 * 1024, 
 #                               time="60")
 
-gpulauncher = find_launcher("""duration=1h & cuda(mem=20G) * 1 & cpu(mem=400M, cores=8)""", tags=["slurm"])
 
 # Configuration of the whole experiment
 @configuration
 class Configuration(ConfigurationBase):
     epochs: int = 1
+    launcher: str =  """duration=3h & cuda(mem=11G)*1 & cpu(cores=8)"""
+    lr: float = 1e-2
+    batch_size: int = 64
+    logs_per_epoch: int = 2
+    with_context: bool = False
     model_name: str = "gpt2-small"
     layers: dict = {'from':0, 'to':1}
 
 def run( helper: ExperimentHelper, cfg: Configuration):
 
     logging.debug(cfg)
+    gpulauncher = find_launcher(cfg.launcher, tags=["slurm"])
+
     logging.info(f"Launching Tasks using launcher: {gpulauncher}")
 
     tasks = {}
@@ -42,8 +48,12 @@ def run( helper: ExperimentHelper, cfg: Configuration):
     for layer in layers:
         task = LearnLabelExtractor(
                         model_name=tag(cfg.model_name), 
+                        with_context= cfg.with_context,
                         layer=tag(layer), 
-                        epochs=cfg.epochs
+                        epochs=cfg.epochs,
+                        lr=cfg.lr,
+                        logs_per_epoch = cfg.logs_per_epoch,
+                        batch_size = cfg.batch_size,
                         )
         tasks[tagspath(task)] =  task.submit(launcher=gpulauncher).jobpath
 
@@ -53,5 +63,6 @@ def run( helper: ExperimentHelper, cfg: Configuration):
     
     for key, jobath in tasks.items():
         path = (runpath / key)
-        if not path.exists():
-            path.symlink_to(jobath)
+        if path.exists():
+            path.unlink()
+        path.symlink_to(jobath)
