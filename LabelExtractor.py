@@ -123,7 +123,7 @@ def infer_entities(model, taskVector, dataset, with_context=False, max_tokens = 
     # print(repr.shape)
     
     with torch.no_grad():
-        for batch in tqdm(dataloader):
+        for batch in dataloader:
 
             texts = batch["text"]
             ids = batch["id"].detach().cpu().numpy()
@@ -162,9 +162,10 @@ def infer_entities(model, taskVector, dataset, with_context=False, max_tokens = 
                     if all(new_toks == eos_tok): break
             
             for i in range(b_size) :
-                gen = model.to_str_tokens(
-                    inp_toks[i,taskVec_idxs[i]+1:])
-                gen = "".join(gen).split(eos_tok_str)[0].strip()
+                gen = model.tokenizer.decode(
+                    inp_toks[i,taskVec_idxs[i]+1:].view(-1))
+                # gen = "".join(gen).split(eos_tok_str)[0].strip()
+                gen = gen.split(eos_tok_str)[0].strip()
                 generated.append( {"id":ids[i] , "inferred": gen})
                 # print(generated)
         #fuse with original dataset
@@ -173,14 +174,14 @@ def infer_entities(model, taskVector, dataset, with_context=False, max_tokens = 
         return 
  
 
-def compute_metrics(model, TaskVec, test_dataset, max_tokens=10, b_size = 50, with_context=True, prepend_bos=True):
+def compute_metrics(model, TaskVec, test_dataset, max_tokens=10, b_size = 50, with_context=True, prepend_bos=True, force_recompute=True):
     """
     Evaluate the model on a given test_loader augmented with representations.
     """
     perfect_acc = 0
     partial_acc = 0
 
-    if not "inferred" in test_dataset[0]:
+    if force_recompute or (not "inferred" in test_dataset[0]):
         infer_entities(model, TaskVec, test_dataset, max_tokens=max_tokens, b_size=b_size, with_context=with_context, prepend_bos=prepend_bos)
     
     for item in tqdm(test_dataset):

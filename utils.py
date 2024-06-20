@@ -71,6 +71,7 @@ def generate_from_repr( model,
                         max_tokens = 10,
                         do_sample = False,
                         prepend_bos=True,
+                        return_type:str = "str"
                         ):
         """
         Args:
@@ -130,8 +131,10 @@ def generate_from_repr( model,
                 inp_toks = torch.hstack((inp_toks,new_tok))
                 # stop if EOS token
                 if new_tok == model.tokenizer.eos_token_id: break
-                
-        return model.to_str_tokens(inp_toks)
+        if return_type == "tokens": 
+            return model.to_str_tokens(inp_toks)
+        else: 
+            return model.tokenizer.decode(inp_toks.view(-1).tolist()[1:])
 
 ############################## DATASETS ##############################
 
@@ -190,7 +193,7 @@ class WebNLGDataset(Dataset):
         for i, ent in enumerate(entities):
             res.append({
                 "entity" : ent,
-                "text" :  texts[i%len(texts)] + ' ' + ent,
+                "text" :  texts[i%len(texts)],
             })
 
         return res
@@ -210,11 +213,13 @@ class WebNLGDataset(Dataset):
         with torch.no_grad():
             for batch in tqdm(dataloader):
                 texts = batch["text"]
+                entities = batch["entity"]
+                prompts = [txt + ' ' + ent for txt, ent in zip(texts, entities)]
                 ids = batch["id"].detach().cpu().numpy()
                 #batched GPU inference
-                str_tokens = model.to_str_tokens(texts, prepend_bos=prepend_bos)
+                str_tokens = model.to_str_tokens(prompts, prepend_bos=prepend_bos)
                 subj_inds = [len(toks) - 1 for toks in str_tokens]
-                tokens = model.to_tokens(texts, prepend_bos=prepend_bos, padding_side='right')
+                tokens = model.to_tokens(prompts, prepend_bos=prepend_bos, padding_side='right')
                 
                 reps = get_representation(model, tokens=tokens, token_inds=subj_inds, layer=layer)
 
