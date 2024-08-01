@@ -1,6 +1,6 @@
 from transformer_lens import HookedTransformer, utils
 from datasets import load_dataset
-import torch, gc
+import torch, gc, re
 from torch.utils.data import DataLoader, Dataset
 import torch.nn as nn
 from tqdm import tqdm
@@ -28,7 +28,6 @@ def get_replace_with_rep_hook(reps, inds):
     
     return lambda tensor, hook: replace_with_rep(tensor, reps, inds)
 
-
 def get_representation(model: HookedTransformer, tokens, token_inds, layer:int, verbose:bool=False ):
     """extract model representation of token [token_inds] at layer [layer]
     Args:
@@ -42,7 +41,14 @@ def get_representation(model: HookedTransformer, tokens, token_inds, layer:int, 
     b_size = tokens.shape[0]
     assert len(token_inds) == b_size
     buffer = torch.zeros(b_size, dim)       #create buffer where to store representations
-    hook_name = utils.get_act_name('resid_post', layer=layer)   # get hook name for the layer output 
+    
+    if layer < 0:
+        #baseline, extract embedding only
+        hook_name = utils.get_act_name('embed')
+    else:        
+        hook_name = utils.get_act_name('resid_post', layer=layer)   # get hook name for the layer output 
+    
+    
     if verbose: print(f"extract representation of tokens {token_inds} at hook {hook_name}")
     
     def save_activation(tensor, buffer, inds):
@@ -137,66 +143,44 @@ def generate_from_repr( model,
             return model.tokenizer.decode(inp_toks.view(-1).tolist()[1:])
 
 ############################## DATASETS ##############################
-
-class WebNLGDataset(Dataset):
-    def __init__(self, data, max_ent_length=40, max_length=512):
-        """WebNLG dataset class
+class EntityReprDataset(Dataset):
+    def __init__(self, data,  max_ent_length=40, max_length=512):
+        """Entity Representation dataset class
         Args:
-            data: list of WebNLG items
+            data: list of dicts containing at least "text" and "entity" keys. 
             max_ent_length: filter entities whose span is bigger than this.
             max_length: maximum length of the text
         """
+
+        #sanity checks
+        assert not None in data
+        for item in data:
+             assert "text" in item.keys()
+             assert "entity" in item.keys()
+
         self.max_length = max_length
         self.max_ent_length = max_ent_length
-        self.data = []
-        for it in data:
-            self.data += self.extract_from_item(it)
-        # finally add index
+        self.data = data
+
+        # filter data
+        def filtered(item):
+            return (len(item["entity"]) > self.max_ent_length or 
+                    len(item["text"]) > self.max_length or 
+                    not any(c.isalpha() for c in item["entity"]))
+        
+        # filter data
+        self.data = [item for item in self.data if not filtered(item)]
+
+        # index data
         for i, item in enumerate(self.data):
             item["id"] = i
-        
-        #sanity checks
-        assert not None in self.data
+
 
     def __len__(self):
         return len(self.data)
 
     def __getitem__(self, idx):
         return self.data[idx]
-        
-    def extract_from_item(self, item):
-        """ Extracts the entity and text from a WebNLG item
-        Args:
-            item: a dictionary with keys 'modified_triple_sets' and 'lex'
-        returns:
-        a list of dictionaries with keys 'entity' and 'text'
-        """
-        # try :
-        def clean_entity(entity):
-            return entity.replace('"','').replace('_',' ').replace('  ',' ').split(' (')[0]
-        # Extract entities
-        rels = item["modified_triple_sets"]["mtriple_set"][0]
-        entities = set()
-        for rel in rels:
-            ents = rel.split(' | ')
-            ents.pop(1)
-            for ent in ents:
-                entities.update([clean_entity(ent)])
-        # filter too big entities
-        entities = [ent for ent in entities if 
-                    (len(ent) <= self.max_ent_length and 
-                     any(c.isalpha() for c in ent))]
-        res = []
-        texts = item["lex"]["text"]
-        if not len(texts) or not len(entities): return []
-
-        for i, ent in enumerate(entities):
-            res.append({
-                "entity" : ent,
-                "text" :  texts[i%len(texts)],
-            })
-
-        return res
         
     def augment_with_repr(self, model, layer, batch_size):
         """
@@ -233,4 +217,104 @@ class WebNLGDataset(Dataset):
         gc.collect()
         torch.cuda.empty_cache()
         self.data =  [item | new_data[item["id"]] for item in self.data]
+
+## Implementation for WebNLG
+class WebNLGDataset(EntityReprDataset):
+    def __init__(self, WebNLGdata, max_ent_length=40, max_length=512):
+        """WebNLG dataset class
+        Args:
+            data: list of WebNLG items
+            max_ent_length: filter entities whose span is bigger than this.
+            max_length: maximum length of the text
+        """
+        data = [] 
+
+        for item in WebNLGdata:
+            data += self.extract_from_item(item)
         
+        super().__init__(
+            data=data,
+            max_ent_length=max_ent_length,
+            max_length=max_length)
+        
+    def extract_from_item(self, item):
+        """ Extracts the entity and text from a WebNLG item
+        Args:
+            item: a dictionary with keys 'modified_triple_sets' and 'lex'
+        returns:
+        a list of dictionaries with keys 'entity' and 'text'
+        """
+        # try :
+        def clean_entity(entity):
+            return entity.replace('"','').replace('_',' ').replace('  ',' ').split(' (')[0]
+        # Extract entities
+        rels = item["modified_triple_sets"]["mtriple_set"][0]
+        entities = set()
+        for rel in rels:
+            ents = rel.split(' | ')
+            ents.pop(1)
+            for ent in ents:
+                entities.update([clean_entity(ent)])
+        
+        res = []
+        texts = item["lex"]["text"]
+        if not len(texts) or not len(entities): return []
+
+        for i, ent in enumerate(entities):
+            res.append({
+                "entity" : ent,
+                "text" :  texts[i%len(texts)],
+            })
+
+        return res
+
+## Implementation for TACRED   
+class TacredDataset(EntityReprDataset):
+    def __init__(self, WebNLGdata, max_ent_length=40, max_length=400, remove_pronouns:bool =True):
+        """WebNLG dataset class
+        Args:
+            data: list of WebNLG items
+            max_ent_length: filter entities whose span is bigger than this.
+            max_length: maximum length of the text
+        """
+        data = [] 
+
+        for item in WebNLGdata:
+            data += self.extract_from_item(item, remove_pronouns=remove_pronouns)
+        
+        super().__init__(
+            data=data,
+            max_ent_length=max_ent_length,
+            max_length=max_length)
+                    
+    def extract_from_item(self, tacred_item: dict, remove_pronouns: bool):
+        """Extracts the subject and label from a TACRED item.
+        Args:
+            item: a dictionary with keys 'modified_triple_sets' and 'lex'
+        returns:
+        a list of dictionaries with keys 'entity' and 'text'
+        """
+        def clean(s):
+            s = s.replace("[subject_start]", "").replace("[subject_end]", "").replace("[object_start]", "").replace("[object_end]", "").strip()
+            return re.sub(r'\s+', ' ', s) #max one space
+        
+        #extract subject 
+        subj = (" " + tacred_item["text"]).split("[subject_start]")[1].split("[subject_end]")[0].strip()
+        subj = clean(subj)
+        #extract label
+        obj = (" " + tacred_item["text"]).split("[object_start]")[1].split("[object_end]")[0].strip()
+        obj = clean(obj)
+
+        # remove tags from text 
+        # remove 2nd sentence
+        text = clean(tacred_item["text"]).replace(" , ", ", ")
+        text = text.split(" . ")[0].strip() + "."
+        res = []
+        for ent in [subj, obj]:
+            if remove_pronouns and ent.lower() in ["he", "she", "his", "her", "him", "they", "their", "them"]:
+                continue
+            res.append({
+                "text": text,
+                "entity": ent,
+            })
+        return res

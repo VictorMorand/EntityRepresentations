@@ -1,0 +1,25 @@
+id: context_label_extractor
+title: "Label Extractor in Context"
+description: "Expermimenting how well the model can extract the label from a representation in context"
+
+# Uses experiment.py
+file: experiment
+
+epochs: 10
+lr: 2e-2
+batch_size: 50  
+logs_per_epoch: 2
+# launcher: "duration=6h & cuda(mem=30G)*1 & cpu(cores=4)" #v100 JZ 
+# launcher: "duration=8h & cuda(mem=45G)*1 & cpu(cores=8)" #a100 80G JZ 
+launcher: "duration=10h & cuda(mem=35G)*1 & cpu(cores=8)" #a100 40G JZ 
+
+# Experimental parameters
+# model_name: "gpt2-medium" # 24 (0-23) layers
+# model_name: "gpt2-large" # 36 (0-35) layers | Need 30 Gb for b_size 30
+# model_name: "gpt2-xl" # 48 (0-47) layers | Need 30 Gb for b_size 30
+model_name: "phi-2" # 32 (0-31) Transformer layers
+dataset_name: "TACRED" 
+with_context: True
+layers: 
+    from: -1
+    to: 31

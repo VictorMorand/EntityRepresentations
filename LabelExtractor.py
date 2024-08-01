@@ -97,7 +97,7 @@ def eval_model(model,
 def infer_entities(model, taskVector, dataset, with_context=False, max_tokens = 20, b_size = 10, prepend_bos=True):
     """
     Infer entities from a given dataset augmented with representations.
-    Will write the inferred entities back to the dataset in the 'generated' field.
+    Will write the inferred entities back to the dataset in the 'inferred' field.
     Args:
         model: the model to use
         TaskVec: the task vector to use
@@ -176,7 +176,7 @@ def infer_entities(model, taskVector, dataset, with_context=False, max_tokens = 
 
 def compute_metrics(model, TaskVec, test_dataset, max_tokens=10, b_size = 50, with_context=True, prepend_bos=True, force_recompute=True):
     """
-    Evaluate the model on a given test_loader augmented with representations.
+    Evaluate the model on a given test_set augmented with representations.
     """
     perfect_acc = 0
     partial_acc = 0
@@ -199,7 +199,7 @@ def compute_metrics(model, TaskVec, test_dataset, max_tokens=10, b_size = 50, wi
 
     return {
         "Partial Match": partial_acc / len(test_dataset),
-        "Perfect Match Acc": perfect_acc / len(test_dataset),
+        "Exact Match": perfect_acc / len(test_dataset),
     }
 
 ############# Main Task #############  
@@ -207,10 +207,12 @@ def compute_metrics(model, TaskVec, test_dataset, max_tokens=10, b_size = 50, wi
 class LearnLabelExtractor(Task):
 
     model_name: Param[str]
+    dataset_name: Param[str]
     layer: Param[int]
     with_context: Param[bool] = False
     first_token_only: bool = False
     max_ent_length: Param[int] = 20
+    max_length: Param[int] = 200
     epochs: Param[int] = 5
     logs_per_epoch: Param[int] = 3
     lr: Param[float] = 1e-2
@@ -233,20 +235,41 @@ class LearnLabelExtractor(Task):
         dim = model.QK.shape[-1]
 
         ################ DATA  ################
-        dataset = load_dataset("web_nlg", "release_v3.0_en", trust_remote_code=True)
-
-        #optionnal, filter categories from datset
-        cat = ['Food'] #WebNLG Categories to remove
-        # cat = None
-        if cat :
-            dataset["train"] = [item for item in dataset["train"] if item["category"] not in cat]
-            dataset["test"] = [item for item in dataset["test"] if item["category"] not in cat]
-
-        # Create dataset instances
-        logging.info("loading dataset ...")
-        train_dataset = utils.WebNLGDataset(dataset['train'], max_ent_length=self.max_ent_length)
-        test_dataset = utils.WebNLGDataset(dataset['test'], max_ent_length=self.max_ent_length)
+        logging.info(f"loading data from {self.dataset_name} ...")
         
+        max_dev_length = 1000
+
+        if self.dataset_name.lower() == "webnlg":
+            dataset = load_dataset("web_nlg", "release_v3.0_en", trust_remote_code=True)
+
+            #optionnal, filter categories from datset
+            cat = ['Food'] #WebNLG Categories to remove
+            # cat = None
+            if cat :
+                dataset["train"] = [item for item in dataset["train"] if item["category"] not in cat]
+                dataset["dev"] = [item for item in dataset["dev"] if item["category"] not in cat]
+                dataset["test"] = [item for item in dataset["test"] if item["category"] not in cat]
+
+            # Create dataset instances
+            train_dataset = utils.WebNLGDataset(dataset['train'], max_ent_length=self.max_ent_length)
+            dev_dataset = utils.WebNLGDataset(dataset['dev'], max_ent_length=self.max_ent_length)
+            test_dataset = utils.WebNLGDataset(dataset['test'], max_ent_length=self.max_ent_length)
+
+        elif self.dataset_name.lower() == "tacred":
+            dataset = load_dataset("AmirLayegh/tacred_text_label")
+            train_dataset = utils.TacredDataset(dataset["train"], max_ent_length=self.max_ent_length, max_length=200)
+            dev_dataset = utils.TacredDataset(dataset["test"], max_ent_length=self.max_ent_length, max_length=200)
+            test_dataset = utils.TacredDataset(dataset["validation"], max_ent_length=self.max_ent_length, max_length=200)
+
+        else: 
+            # unknown Dataset 
+            raise NotImplementedError("dataset Name must be either 'webnlg' or 'tacred'")
+
+
+        #limit the number of samples for testing
+        print(f"initial dev dataset size: {len(dev_dataset.data)}, truncating to {max_dev_length}")
+        dev_dataset.data = list(np.random.choice(dev_dataset.data, max_dev_length, replace=False))
+
         logging.info("loading dataset done !")
         logging.info(f"train length: {len(train_dataset)}")
         logging.info(f"test length: {len(test_dataset)}")
@@ -256,6 +279,8 @@ class LearnLabelExtractor(Task):
         train_dataset.augment_with_repr(model, self.layer, batch_size=self.batch_size)
         logging.info("Augmenting Test set with subject representations ... ")
         test_dataset.augment_with_repr(model, self.layer, batch_size=self.batch_size)
+        logging.info("Augmenting dev set with subject representations ... ")
+        dev_dataset.augment_with_repr(model, self.layer, batch_size=self.batch_size)
         logging.info("Extraction of subjects representatons Done !\n")
 
         ################ TRAINING ################
@@ -270,14 +295,13 @@ class LearnLabelExtractor(Task):
         for param in model.parameters():
             param.requires_grad = False
 
-
         logging.info(f"Beging Label extractor Training ...")
         
         eos_tok_str = model.tokenizer.eos_token
         replace_hook_name = tl.utils.get_act_name('embed') #pos_embed for gpt2 ... 
         logging.info(f"will insert representation at hook '{replace_hook_name}'")
         train_dataloader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=True)
-        test_dataloader = DataLoader(test_dataset, batch_size=200, shuffle=True)
+        dev_dataloader = DataLoader(dev_dataset, batch_size=200, shuffle=True)
         n_log = len(train_dataloader) // self.logs_per_epoch
         
 
@@ -340,7 +364,7 @@ class LearnLabelExtractor(Task):
                     acc = (eval_model(
                             model,
                             TaskVec,
-                            test_loader=test_dataloader, 
+                            test_loader=dev_dataloader, 
                             first_token_only= self.first_token_only, 
                             with_context= self.with_context,
                             prepend_bos=prepend_bos))
@@ -353,7 +377,9 @@ class LearnLabelExtractor(Task):
                                 model,
                                 TaskVec,
                                 test_dataset,
-                                b_size=100)
+                                b_size=100,
+                                with_context=self.with_context,
+                                prepend_bos=prepend_bos)
         logging.info(metrics)
 
         #add metrics to last logging

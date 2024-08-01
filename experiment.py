@@ -33,7 +33,8 @@ class Configuration(ConfigurationBase):
     logs_per_epoch: int = 2
     with_context: bool = False
     model_name: str = "gpt2-small"
-    layers: dict = {'from':0, 'to':1}
+    dataset_name: str = "webNLG"
+    layers: dict = {'from':0, 'to':0}
 
 def run( helper: ExperimentHelper, cfg: Configuration):
 
@@ -47,7 +48,8 @@ def run( helper: ExperimentHelper, cfg: Configuration):
     logging.info(f"will launch jobs for layers {layers} of {cfg.model_name} ")
     for layer in layers:
         task = LearnLabelExtractor(
-                        model_name=tag(cfg.model_name), 
+                        model_name= tag(cfg.model_name), 
+                        dataset_name= tag(cfg.dataset_name), 
                         with_context= cfg.with_context,
                         layer=tag(layer), 
                         epochs=cfg.epochs,
