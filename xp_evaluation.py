@@ -1,0 +1,69 @@
+#Author : Victor MORAND
+# 
+import logging, os
+from typing import List, Optional
+from experimaestro.experiments import ExperimentHelper, configuration
+from experimaestro import tag, tagspath, Constant
+from experimaestro.experiments.configuration import ConfigurationBase
+from experimaestro.launcherfinder import find_launcher
+from experimaestro.launchers.slurm import SlurmLauncher
+
+# import task
+from LabelExtractor import EvalLabelExtractor, METRIC_VERSION
+from processResults import loadResults
+
+logging.basicConfig(level=logging.DEBUG)
+
+# Configuration of the whole experiment
+@configuration
+class Configuration(ConfigurationBase):
+    jobs_path: str = "/home/morand/experiments_JeanZay/jobs/labelextractor.learnlabelextractor/"
+    model_names: List[str] = ["gpt2-small"]
+    launchers: List[str] =  ["""duration=3h & cuda(mem=11G)*1 & cpu(cores=8)"""]
+    batch_size: int = 100
+    with_context: bool = False
+    dataset_name: str = "webNLG"
+    metrics_v: Constant[float] = METRIC_VERSION
+
+def run( helper: ExperimentHelper, cfg: Configuration):
+
+    logging.debug(cfg)
+    if len(cfg.launchers) < len(cfg.model_names):
+        raise ValueError(f"Got {len(cfg.launchers)} launchers for {len(cfg.model_names)} models to evaluate")
+    
+    results = loadResults(cfg.jobs_path)
+
+    for i, model in enumerate(cfg.model_names):
+
+        filtered_results = results[(results["model_name"]== model) &
+                  (results["dataset_name"]==cfg.dataset_name) &
+                  (results["with_context"]==cfg.with_context) ]
+        #get launcher for current model name.
+        gpulauncher = find_launcher(cfg.launchers[i], tags=["slurm"])
+        logging.info(f"Launching Tasks for {model} using launcher: {gpulauncher}")
+
+        for _ , row in filtered_results.iterrows():
+            #find taskVec
+            files = [file for file in os.listdir(row["path"]) if file.endswith(".pth")]
+            #get the taskVec file
+            if len(files) == 0:
+                logging.info("No taskVec file found")
+                continue
+            else:
+                taskVecPath = row["path"] / files[0]
+            logging.info(f"launching evaluation of {taskVecPath}...")
+
+            task = EvalLabelExtractor(
+                job_path= str(row["path"]),
+                TaskVec_path= str(taskVecPath),
+                dataset_name=cfg.dataset_name,
+                model_name=model,
+                layer=row["layer"],
+                batch_size=cfg.batch_size,
+                with_context=cfg.with_context,
+            )
+            task.submit(launcher=gpulauncher)
+            break
+
+
+    

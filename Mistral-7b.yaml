@@ -2,8 +2,8 @@ id: label_extractor
 title: "Label Extractor"
 description: "full config experiment for Mistral 7B"
 
-# Uses experiment.py
-file: experiment
+# Uses xp_learn.py
+file: xp_learn
 
 epochs: 10
 lr: 2e-2

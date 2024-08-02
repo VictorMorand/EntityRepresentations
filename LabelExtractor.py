@@ -5,14 +5,15 @@ from typing import List, Optional
 import logging
 import transformer_lens as tl 
 from transformer_lens import HookedTransformer
-from experimaestro import Config, Task, Param
+from experimaestro import Config, Task, Param, Constant
 from datasets import load_dataset
-import torch, gc, json
+import torch, gc, json, os
 from torch.utils.data import DataLoader
 import torch.nn as nn
 import numpy as np
 from tqdm import tqdm
 from pathlib import Path
+import evaluate
 
 ############# utils #############  
 import utils 
@@ -173,6 +174,8 @@ def infer_entities(model, taskVector, dataset, with_context=False, max_tokens = 
              dataset[gen["id"]].update(gen)
         return 
  
+METRIC_VERSION = 1.2
+evalFileName = f"Evaluation_{METRIC_VERSION}.json"
 
 def compute_metrics(model, TaskVec, test_dataset, max_tokens=10, b_size = 50, with_context=True, prepend_bos=True, force_recompute=True):
     """
@@ -197,10 +200,28 @@ def compute_metrics(model, TaskVec, test_dataset, max_tokens=10, b_size = 50, wi
         if gen_entity in target or target in gen_entity:
             partial_acc += 1
 
+    #compute chrf with HF evaluate package -> https://huggingface.co/spaces/evaluate-metric/chrf 
+    chrf = evaluate.load("chrf")
+    chrf_score = chrf.compute(predictions = [ item['inferred'] for item in test_dataset],
+                               references = [ item['entity'] for item in test_dataset])
+
     return {
         "Partial Match": partial_acc / len(test_dataset),
         "Exact Match": perfect_acc / len(test_dataset),
+        "Chr-F": chrf_score["score"], 
+        "Version": METRIC_VERSION,
     }
+
+def save_inferences(model_name, layer, test_dataset):
+    """ Write inferred entities save in dataset under 'inferrred' key to a json file for further examination.
+    """
+    fileName = f'Inference_{model_name}_l{layer}.json'
+    generation = [ {
+                "entity": item['entity'], 
+                "generation": item['inferred'],
+                    } for item in test_dataset ]
+    with open(fileName, 'w') as fp:
+        json.dump(generation, fp)
 
 ############# Main Task #############  
 
@@ -373,6 +394,12 @@ class LearnLabelExtractor(Task):
                     logging.info(f" Epoch {e:.1f}, Language modeling loss: {m_loss:.3f}, Test Acc: {acc:.3f}")
                     m_loss = 0 # reset
         
+        # Save TaskVector and train history
+        fileName = f'TaskVec_{self.model_name}_l{self.layer}_e{len(hist)}.pth'
+        torch.save(TaskVec, fileName) 
+        
+        #Evaluation stage
+
         metrics = compute_metrics(
                                 model,
                                 TaskVec,
@@ -385,19 +412,109 @@ class LearnLabelExtractor(Task):
         #add metrics to last logging
         hist[-1].update(metrics)
         
-        # Save TaskVector and train history
-        fileName = f'TaskVec_{self.model_name}_l{self.layer}_e{len(hist)}.pth'
-        torch.save(TaskVec, fileName) 
-        
         #save history
         with open('history.json', 'w') as fp:
             json.dump(hist, fp)
 
         #save generation
-        fileName = f'Inference_{self.model_name}_l{self.layer}_e{len(hist)}.json'
-        generation = [ {
-                    "entity": item['entity'], 
-                    "generation": item['inferred'],
-                        } for item in test_dataset ]
-        with open(fileName, 'w') as fp:
-            json.dump(generation, fp)
+        save_inferences(self.model_name,self.layer, test_dataset)
+
+        # save computed metrics
+        with open(evalFileName, 'w') as fp:
+            json.dump(metrics, fp) 
+
+############# Evaluation Task #############  
+
+class EvalLabelExtractor(Task):
+
+    job_path: Param[str]
+    TaskVec_path: Param[str]
+    model_name: Param[str]
+    dataset_name: Param[str]
+    layer: Param[int]
+    with_context: Param[bool] = False
+    max_ent_length: Param[int] = 20
+    max_length: Param[int] = 200
+    batch_size: Param[int] = 64
+    metrics_v: Constant[float] = METRIC_VERSION
+
+    def execute(self):
+        """Perform Evaluation of a previously trained TaskVec"""
+        
+        #change working dir 
+        os.chdir(self.job_path)
+
+        #check if evaluation has already been done or not:
+        if (Path(self.job_path) / evalFileName).exists():
+            logging.info(f"{evalFileName} already exixts in {self.job_path}, returing...")
+            return
+        else :
+            logging.info(f"Results will be written in {evalFileName}")
+
+        #Load Model
+        logging.info(f"loading model {self.model_name} ...")
+        model = HookedTransformer.from_pretrained(
+                                            self.model_name, 
+                                            trust_remote_code = True, 
+                                            low_cpu_mem_usage = True, 
+                                            device_map='auto',
+                                            move_to_device=False,
+                                            fold_ln=False,
+                                            fold_value_biases=False,
+                                            center_writing_weights=False,
+                                            center_unembed=False,
+                                            )
+        model.eval()
+        model = model.cuda()
+
+        #Load Task Vector
+        logging.info(f"loading TaskVec from {self.TaskVec_path} ...")
+        TaskVec = torch.load(self.TaskVec_path)
+
+        # Load Data
+        logging.info(f"loading data from {self.dataset_name} ...")
+        if self.dataset_name.lower() == "webnlg":
+            dataset = load_dataset("web_nlg", "release_v3.0_en", trust_remote_code=True)
+
+            #optionnal, filter categories from datset
+            cat = ['Food'] #WebNLG Categories to remove
+            # cat = None
+            if cat :
+                dataset["test"] = [item for item in dataset["test"] if item["category"] not in cat]
+
+            # Create dataset instances
+            test_dataset = utils.WebNLGDataset(dataset['test'], 
+                                               max_ent_length=self.max_ent_length,
+                                               max_length=self.max_length)
+
+        elif self.dataset_name.lower() == "tacred":
+            dataset = load_dataset("AmirLayegh/tacred_text_label")
+            test_dataset = utils.TacredDataset(dataset["validation"], 
+                                               max_ent_length=self.max_ent_length, 
+                                               max_length=self.max_length)
+        else: 
+            # unknown Dataset 
+            raise NotImplementedError("dataset Name must be either 'webnlg' or 'tacred'")
+        
+        
+        #augment test set with representations
+        logging.info(f"augmenting test dataset with representations from layer {self.layer}")
+        test_dataset.augment_with_repr(model, self.layer, batch_size=self.batch_size)
+
+        #Compute metricss
+        metrics = compute_metrics(
+                                model,
+                                TaskVec,
+                                test_dataset,
+                                b_size=self.batch_size,
+                                with_context=self.with_context,
+                                )
+        logging.info(metrics)
+
+        # save inferences
+        save_inferences(self.model_name,self.layer, test_dataset)
+
+        # save computed metrics
+        with open(evalFileName, 'w') as fp:
+            json.dump(metrics, fp) 
+

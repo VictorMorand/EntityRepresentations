@@ -1,12 +1,15 @@
 import pathlib, os, json
 import numpy as np
 import pandas as pd
+from pathlib import Path
 
 def loadResults(xp_path):
     """ load all results from a given experimaestro experiment directory
     xp_path: pathlib.Path, path to the jobs to load.
     """
-
+    if type(xp_path) is not Path:
+         xp_path = Path(xp_path)
+    
     jobs = os.listdir(xp_path)
     # print(f"available jobs: {jobs}")
 

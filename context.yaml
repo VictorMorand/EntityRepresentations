@@ -2,8 +2,8 @@ id: context_label_extractor
 title: "Label Extractor in Context"
 description: "Expermimenting how well the model can extract the label from a representation in context"
 
-# Uses experiment.py
-file: experiment
+# Uses xp_learn.py
+file: xp_learn
 
 epochs: 10
 lr: 2e-2

@@ -2,8 +2,8 @@ id: label_extractor
 title: "Label Extractor"
 description: "Debug onfiguration for the label extraction experiment"
 
-# Uses experiment.py
-file: experiment
+# Uses xp_learn.py
+file: xp_learn
 
 # Just debugging
 epochs: 1
