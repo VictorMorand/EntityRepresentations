@@ -38,6 +38,8 @@ def run( helper: ExperimentHelper, cfg: Configuration):
         filtered_results = results[(results["model_name"]== model) &
                   (results["dataset_name"]==cfg.dataset_name) &
                   (results["with_context"]==cfg.with_context) ]
+        logging.info(f"got  {len(filtered_results)} with config: {cfg}")
+        
         #get launcher for current model name.
         gpulauncher = find_launcher(cfg.launchers[i], tags=["slurm"])
         logging.info(f"Launching Tasks for {model} using launcher: {gpulauncher}")
@@ -54,16 +56,15 @@ def run( helper: ExperimentHelper, cfg: Configuration):
             logging.info(f"launching evaluation of {taskVecPath}...")
 
             task = EvalLabelExtractor(
-                job_path= str(row["path"]),
-                TaskVec_path= str(taskVecPath),
-                dataset_name=cfg.dataset_name,
-                model_name=model,
-                layer=row["layer"],
-                batch_size=cfg.batch_size,
-                with_context=cfg.with_context,
+                job_path =  str(row["path"]),
+                TaskVec_path =  str(taskVecPath),
+                dataset_name =  tag(cfg.dataset_name),
+                model_name =  tag(model),
+                layer =  tag(row["layer"]),
+                batch_size = cfg.batch_size,
+                with_context =  tag(cfg.with_context),
             )
             task.submit(launcher=gpulauncher)
-            break
 
 
     

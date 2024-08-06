@@ -1,0 +1,30 @@
+id: label_extractor_eval
+title: "Label Extractor evaluation"
+description: "Full config for evaluation experiment"
+
+# Uses xp_evaluation.py
+file: xp_evaluation
+
+# Experimental parameters
+jobs_path: "/lustre/fswork/projects/rech/cdt/uqo57sk/experiments/jobs/labelextractor.learnlabelextractor"
+model_names: [
+    "gpt2-small",  # 12 (0-11) Transformer layers
+    "gpt2-medium", # 24 (0-23) Transformer layers
+    "gpt2-large",  # 36 (0-35) Transformer layers
+    "gpt2-xl",     # 48 (0-47) Transformer layers
+    "phi-2",       # 32 (0-31) Transformer layers
+    "mistral-7B",  # 32 (0-31) Transformer layers
+    ]
+
+launchers: [
+    "duration=3h & cuda(mem=16G)*1 & cpu(cores=8)",    # v100 JZ
+    "duration=3h & cuda(mem=16G)*1 & cpu(cores=8)",    # v100 JZ
+    "duration=3h & cuda(mem=24G)*1 & cpu(cores=8)",    # v100 JZ
+    "duration=3h & cuda(mem=24G)*1 & cpu(cores=8)",    # v100 JZ
+    "duration=3h & cuda(mem=45G)*1 & cpu(cores=8)",    # A100 JZ
+    "duration=3h & cuda(mem=45G)*1 & cpu(cores=8)",    # A100 JZ
+    ]
+
+batch_size: 100
+dataset_name: "TACRED"
+with_context: True

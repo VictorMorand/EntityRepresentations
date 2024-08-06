@@ -2,6 +2,7 @@ import pathlib, os, json
 import numpy as np
 import pandas as pd
 from pathlib import Path
+from tqdm import tqdm
 
 def loadResults(xp_path):
     """ load all results from a given experimaestro experiment directory
@@ -14,7 +15,7 @@ def loadResults(xp_path):
     # print(f"available jobs: {jobs}")
 
     results = []
-    for job in jobs:
+    for job in tqdm(jobs):
         jobPath = xp_path / job
         job_data = {"path": jobPath,}
         with open( jobPath / "params.json") as json_file:
@@ -39,6 +40,16 @@ def loadResults(xp_path):
 
         job_data["history"] = history
 
+        # Find Evaluation files
+        eval_file = sorted([f for f in os.listdir(jobPath) if f.startswith("Evaluation")])
+        # print("found eval files:", eval_file)
+        if len(eval_file) == 0:
+            job_data["Eval"] = None
+        else:
+            with open( jobPath / eval_file[-1] ) as json_file:
+                job_data["Eval"] = json.load(json_file)
+
+        # Find Inference files
         inf_file = [f for f in os.listdir(jobPath) if f.startswith("Inference")]
         if len(inf_file) == 0:
             job_data["inference"] = None

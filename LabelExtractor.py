@@ -201,7 +201,7 @@ def compute_metrics(model, TaskVec, test_dataset, max_tokens=10, b_size = 50, wi
             partial_acc += 1
 
     #compute chrf with HF evaluate package -> https://huggingface.co/spaces/evaluate-metric/chrf 
-    chrf = evaluate.load("chrf")
+    chrf = evaluate.load("chrf")        
     chrf_score = chrf.compute(predictions = [ item['inferred'] for item in test_dataset],
                                references = [ item['entity'] for item in test_dataset])
 
