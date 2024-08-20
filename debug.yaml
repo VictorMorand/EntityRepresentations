@@ -2,14 +2,17 @@ id: label_extractor
 title: "Label Extractor"
 description: "Debug onfiguration for the label extraction experiment"
 
-# Uses experiment.py
-file: experiment
+# Uses xp_learn.py
+file: xp_learn
 
 # Just debugging
 epochs: 1
+lr: 1e-2
+batch_size: 64
+logs_per_epoch: 3
 
 # Experimental parameters
 model_name: "gpt2-small" # 12 (0-11) Transformer layers
 layers: 
-    from: 9
-    to: 11
+    from: 1
+    to: 2

@@ -1,0 +1,19 @@
+id: label_extractor
+title: "Label Extractor"
+description: "full config experiment for Mistral 7B"
+
+# Uses xp_learn.py
+file: xp_learn
+
+epochs: 10
+lr: 2e-2
+batch_size: 60
+logs_per_epoch: 1
+launcher: "duration=10h & cuda(mem=45G)*1 & cpu(cores=8)" # A100 JZ
+
+# Experimental parameters
+model_name: "mistral-7B" # 32 (0-31) Transformer layers
+with_context: False
+layers: 
+    from: 0
+    to: 31

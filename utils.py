@@ -1,6 +1,6 @@
 from transformer_lens import HookedTransformer, utils
 from datasets import load_dataset
-import torch, gc
+import torch, gc, re
 from torch.utils.data import DataLoader, Dataset
 import torch.nn as nn
 from tqdm import tqdm
@@ -11,29 +11,28 @@ from typing import List, Dict, Any
 
 
 # place a hook to replace representation of "_" 
-def get_replace_with_rep_hook(reps, ind): 
+def get_replace_with_rep_hook(reps, inds): 
     
-    def replace_with_rep(tensor, reps, ind):
+    def replace_with_rep(tensor, reps, inds):
         """replace first token with representation
         Args:
-            tensor: the act cache to modify
-            ind, the token index that we want to overwrite 
-
+            tensor: (batch, sent_len, H) the act cache to modify
+            reps tensor(batch, H) the representations to overwrite at hook
+            inds tensor(batch), the indexes that we want to overwrite in each sentence of batch 
         """
-        # print(hook.name)
-        # print("got tensor of shape", tensor.shape)
         #replace the token a ind by the given representations
-        tensor[:,ind,:] = reps
+        # tensor[torch.arange(tensor.shape[0]),inds,:] = reps # slower
+        inds_expanded = inds.unsqueeze(1).expand(-1, tensor.shape[-1]).unsqueeze(1).to(tensor.device)
+        tensor.scatter_(1, inds_expanded, reps.unsqueeze(1))
         return tensor
     
-    return lambda tensor, hook: replace_with_rep(tensor, reps, ind)
-
+    return lambda tensor, hook: replace_with_rep(tensor, reps, inds)
 
 def get_representation(model: HookedTransformer, tokens, token_inds, layer:int, verbose:bool=False ):
     """extract model representation of token [token_inds] at layer [layer]
     Args:
         model: HookedTransformer form TransformerLens to extract representations from
-        tokens: (batch, N) tokenized texts to process
+        tokens: tensor(batch, N) tokenized texts to process
         token_inds: (batch) index of tokens where to extract representation
         layer: layer at which to retreive the representations
     """ 
@@ -42,7 +41,14 @@ def get_representation(model: HookedTransformer, tokens, token_inds, layer:int, 
     b_size = tokens.shape[0]
     assert len(token_inds) == b_size
     buffer = torch.zeros(b_size, dim)       #create buffer where to store representations
-    hook_name = utils.get_act_name('resid_post', layer=layer)   # get hook name for the layer output 
+    
+    if layer < 0:
+        #baseline, extract embedding only
+        hook_name = utils.get_act_name('embed')
+    else:        
+        hook_name = utils.get_act_name('resid_post', layer=layer)   # get hook name for the layer output 
+    
+    
     if verbose: print(f"extract representation of tokens {token_inds} at hook {hook_name}")
     
     def save_activation(tensor, buffer, inds):
@@ -71,6 +77,7 @@ def generate_from_repr( model,
                         max_tokens = 10,
                         do_sample = False,
                         prepend_bos=True,
+                        return_type:str = "str"
                         ):
         """
         Args:
@@ -89,27 +96,28 @@ def generate_from_repr( model,
         
         if taskVector is not None:
             taskVector = taskVector.view(1,-1)
-            b_taskVec = taskVector.repeat(repr.shape[0],1)
+            b_taskVec = taskVector.repeat(repr.shape[0],1).cuda()
+        
+        repr = repr.cuda()
         # print(b_taskVec.shape)
         # print(repr.shape)
         
         for i in range(max_tokens):
-
                 # print(inputs, targets)
                 if taskVector is not None:
                     logits = model.run_with_hooks(
                             inp_toks,
                             return_type = "logits",
                             fwd_hooks=[
-                            (replace_hook_name, get_replace_with_rep_hook(repr, rep_idx)), # replace '_' by the subject Representation
-                            (replace_hook_name, get_replace_with_rep_hook(b_taskVec, taskVec_idx)) # replace 'called' by TaskVec Representation
+                            (replace_hook_name, get_replace_with_rep_hook(repr, torch.tensor([rep_idx]))), # replace '_' by the subject Representation
+                            (replace_hook_name, get_replace_with_rep_hook(b_taskVec, torch.tensor([taskVec_idx]))) # replace 'called' by TaskVec Representation
                             ])
                 else:
                     logits = model.run_with_hooks(
                             inp_toks,
                             return_type = "logits",
                             fwd_hooks=[
-                            (replace_hook_name, get_replace_with_rep_hook(repr, rep_idx)), # replace '_' by the subject Representation
+                            (replace_hook_name, get_replace_with_rep_hook(repr, torch.tensor([rep_idx]))), # replace '_' by the subject Representation
                             ])
 
                 final_logits =  logits[0,-1,:] #extract logits for last token 
@@ -129,36 +137,105 @@ def generate_from_repr( model,
                 inp_toks = torch.hstack((inp_toks,new_tok))
                 # stop if EOS token
                 if new_tok == model.tokenizer.eos_token_id: break
-        print(model.to_string(inp_toks))
-
+        if return_type == "tokens": 
+            return model.to_str_tokens(inp_toks)
+        else: 
+            return model.tokenizer.decode(inp_toks.view(-1).tolist()[1:])
 
 ############################## DATASETS ##############################
-
-class WebNLGDataset(Dataset):
-    def __init__(self, data, max_ent_length=40, max_length=512):
-        """WebNLG dataset class
+class EntityReprDataset(Dataset):
+    def __init__(self, data,  max_ent_length=40, max_length=512):
+        """Entity Representation dataset class
         Args:
-            data: list of WebNLG items
+            data: list of dicts containing at least "text" and "entity" keys. 
             max_ent_length: filter entities whose span is bigger than this.
             max_length: maximum length of the text
         """
+
+        #sanity checks
+        assert not None in data
+        for item in data:
+             assert "text" in item.keys()
+             assert "entity" in item.keys()
+
         self.max_length = max_length
         self.max_ent_length = max_ent_length
-        self.data = []
-        for it in data:
-            self.data += self.extract_from_item(it)
-        # finally add index
+        self.data = data
+
+        # filter data
+        def filtered(item):
+            return (len(item["entity"]) > self.max_ent_length or 
+                    len(item["text"]) > self.max_length or 
+                    not any(c.isalpha() for c in item["entity"]))
+        
+        # filter data
+        self.data = [item for item in self.data if not filtered(item)]
+
+        # index data
         for i, item in enumerate(self.data):
             item["id"] = i
-        
-        #sanity checks
-        assert not None in self.data
+
 
     def __len__(self):
         return len(self.data)
 
     def __getitem__(self, idx):
         return self.data[idx]
+        
+    def augment_with_repr(self, model, layer, batch_size):
+        """
+        augment the dataset with extracted representations in given model at given hook
+        Args:
+            model: HookedTransformer model to extract representations from
+            layer: layer at which to retreive the representations
+            batch_size: batch size for inference
+        """
+        new_data = {}
+        prepend_bos = True
+        dataloader = DataLoader(self.data, batch_size=batch_size, shuffle=False)
+
+        with torch.no_grad():
+            for batch in tqdm(dataloader):
+                texts = batch["text"]
+                entities = batch["entity"]
+                prompts = [txt + ' ' + ent for txt, ent in zip(texts, entities)]
+                ids = batch["id"].detach().cpu().numpy()
+                #batched GPU inference
+                str_tokens = model.to_str_tokens(prompts, prepend_bos=prepend_bos)
+                subj_inds = [len(toks) - 1 for toks in str_tokens]
+                tokens = model.to_tokens(prompts, prepend_bos=prepend_bos, padding_side='right')
+                
+                reps = get_representation(model, tokens=tokens, token_inds=subj_inds, layer=layer)
+
+                #Augment dataset with representation and retrieval prompt
+                for i in range(len(ids)):
+                    new_data[ids[i]] = {"representation" : reps[i,:],}
+        
+        #GPU cleanup
+        del dataloader
+        del batch
+        gc.collect()
+        torch.cuda.empty_cache()
+        self.data =  [item | new_data[item["id"]] for item in self.data]
+
+## Implementation for WebNLG
+class WebNLGDataset(EntityReprDataset):
+    def __init__(self, WebNLGdata, max_ent_length=40, max_length=512):
+        """WebNLG dataset class
+        Args:
+            data: list of WebNLG items
+            max_ent_length: filter entities whose span is bigger than this.
+            max_length: maximum length of the text
+        """
+        data = [] 
+
+        for item in WebNLGdata:
+            data += self.extract_from_item(item)
+        
+        super().__init__(
+            data=data,
+            max_ent_length=max_ent_length,
+            max_length=max_length)
         
     def extract_from_item(self, item):
         """ Extracts the entity and text from a WebNLG item
@@ -178,10 +255,7 @@ class WebNLGDataset(Dataset):
             ents.pop(1)
             for ent in ents:
                 entities.update([clean_entity(ent)])
-        # filter too big entities
-        entities = [ent for ent in entities if 
-                    (len(ent) <= self.max_ent_length and 
-                     any(c.isalpha() for c in ent))]
+        
         res = []
         texts = item["lex"]["text"]
         if not len(texts) or not len(entities): return []
@@ -189,42 +263,58 @@ class WebNLGDataset(Dataset):
         for i, ent in enumerate(entities):
             res.append({
                 "entity" : ent,
-                "text" :  texts[i%len(texts)] + ' ' + ent,
+                "text" :  texts[i%len(texts)],
             })
 
         return res
-        
-    def augment_with_repr(self, model, layer, batch_size):
-        """
-        augment the dataset with extracted representations in given model at given hook
+
+## Implementation for TACRED   
+class TacredDataset(EntityReprDataset):
+    def __init__(self, WebNLGdata, max_ent_length=40, max_length=400, remove_pronouns:bool =True):
+        """WebNLG dataset class
         Args:
-            model: HookedTransformer model to extract representations from
-            layer: layer at which to retreive the representations
-            batch_size: batch size for inference
+            data: list of WebNLG items
+            max_ent_length: filter entities whose span is bigger than this.
+            max_length: maximum length of the text
         """
-        new_data = {}
-        prepend_bos = True
-        dataloader = DataLoader(self.data, batch_size=batch_size, shuffle=False)
+        data = [] 
 
-        with torch.no_grad():
-            for batch in tqdm(dataloader):
-                texts = batch["text"]
-                ids = batch["id"].detach().cpu().numpy()
-                #batched GPU inference
-                str_tokens = model.to_str_tokens(texts, prepend_bos=prepend_bos)
-                subj_inds = [len(toks) - 1 for toks in str_tokens]
-                tokens = model.to_tokens(texts, prepend_bos=prepend_bos, padding_side='right')
-                
-                reps = get_representation(model, tokens=tokens, token_inds=subj_inds, layer=layer)
+        for item in WebNLGdata:
+            data += self.extract_from_item(item, remove_pronouns=remove_pronouns)
+        
+        super().__init__(
+            data=data,
+            max_ent_length=max_ent_length,
+            max_length=max_length)
+                    
+    def extract_from_item(self, tacred_item: dict, remove_pronouns: bool):
+        """Extracts the subject and label from a TACRED item.
+        Args:
+            item: a dictionary with keys 'modified_triple_sets' and 'lex'
+        returns:
+        a list of dictionaries with keys 'entity' and 'text'
+        """
+        def clean(s):
+            s = s.replace("[subject_start]", "").replace("[subject_end]", "").replace("[object_start]", "").replace("[object_end]", "").strip()
+            return re.sub(r'\s+', ' ', s) #max one space
+        
+        #extract subject 
+        subj = (" " + tacred_item["text"]).split("[subject_start]")[1].split("[subject_end]")[0].strip()
+        subj = clean(subj)
+        #extract label
+        obj = (" " + tacred_item["text"]).split("[object_start]")[1].split("[object_end]")[0].strip()
+        obj = clean(obj)
 
-                #Augment dataset with representation and retrieval prompt
-                for i in range(len(ids)):
-                    new_data[ids[i]] = {"representation" : reps[i,:],}
-        
-        #GPU cleanup
-        del dataloader
-        del batch
-        gc.collect()
-        torch.cuda.empty_cache()
-        self.data =  [item | new_data[item["id"]] for item in self.data]
-        
+        # remove tags from text 
+        # remove 2nd sentence
+        text = clean(tacred_item["text"]).replace(" , ", ", ")
+        text = text.split(" . ")[0].strip() + "."
+        res = []
+        for ent in [subj, obj]:
+            if remove_pronouns and ent.lower() in ["he", "she", "his", "her", "him", "they", "their", "them"]:
+                continue
+            res.append({
+                "text": text,
+                "entity": ent,
+            })
+        return res
