@@ -26,5 +26,6 @@ launchers: [
     ]
 
 batch_size: 100
-dataset_name: "TACRED"
+# dataset_name: "TACRED"
+dataset_name: "WebNLG"
 with_context: True

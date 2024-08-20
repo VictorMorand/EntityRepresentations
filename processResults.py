@@ -50,11 +50,14 @@ def loadResults(xp_path):
                 job_data["Eval"] = json.load(json_file)
 
         # Find Inference files
-        inf_file = [f for f in os.listdir(jobPath) if f.startswith("Inference")]
-        if len(inf_file) == 0:
+        inf_files = [f for f in os.listdir(jobPath) if f.startswith("Inference")]
+        if len(inf_files) == 0:
             job_data["inference"] = None
         else:
-            job_data["inference"] = jobPath / inf_file[0]
+             # Sort files by modification time, most recent first
+            inf_files.sort(key=lambda f: os.path.getmtime(jobPath / f), reverse=True)
+            # Select the most recent file
+            job_data["inference"] = jobPath / inf_files[0]
 
         results.append(job_data)
 

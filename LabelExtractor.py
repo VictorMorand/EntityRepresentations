@@ -85,7 +85,7 @@ def eval_model(model,
                     return_type = "logits",
                     fwd_hooks=[
                         (replace_hook_name, utils.get_replace_with_rep_hook(reps, rep_idxs)), # replace '_' by the subject Representation
-                        (replace_hook_name, utils.get_replace_with_rep_hook(b_taskVec, taskVec_idxs)) # replace 'called' by TaskVec Representation
+                        (replace_hook_name, utils.get_replace_with_rep_hook(b_taskVec, taskVec_idxs)) # replace '>' by TaskVec Representation
                         ]
                 ,)
 
@@ -95,36 +95,49 @@ def eval_model(model,
 
     return m_acc / b_count
 
-def infer_entities(model, taskVector, dataset, with_context=False, max_tokens = 20, b_size = 10, prepend_bos=True):
+def infer_entities(model,
+                   taskVector, 
+                   dataset, 
+                   with_context: bool = False, 
+                   return_attn_pattern: bool = False,
+                   max_tokens = 20, 
+                   b_size = 10, 
+                   prepend_bos:bool = True
+    ):
     """
     Infer entities from a given dataset augmented with representations.
     Will write the inferred entities back to the dataset in the 'inferred' field.
     Args:
         model: the model to use
         TaskVec: the task vector to use
-        dataset: the dataset to infer entities from, must have been augmented with representations and contain prompt
+        dataset: the dataset to infer entities from, 
+            must have a 'representation' key that stores the entity representation to generate from. 
+            must contain 'text' key for context
         with_context : bool : if True, the context is prepended to the entity
+        return_attn_pattern : bool : if True, will return the attention pattern
         max_tokens: the maximum number of tokens to generate
-        b_size: the batch size to use
+        b_size: the batch size to use when inferring on a bug dataset
         prepend_bos: whether to prepend the BOS token to the input
+    Returns:
+        None, will write the inferred entities (and optionnally attn patterns) back to the dataset
     """
     assert taskVector is not None
-    # assert isinstance(dataset, utils.WebNLGDataset)
     assert "text" in dataset[0]
     
     # inp_toks = model.to_tokens(, prepend_bos=prepend_bos)
     replace_hook_name = tl.utils.get_act_name('embed')
+    #get the attention pattern hooks names
+    pattern_hooks_names = [ tl.utils.get_act_name("pattern", l, "attn") for l in range(model.cfg.n_layers)]
     
     taskVector = taskVector.view(1,-1)
     dataloader = DataLoader(dataset, batch_size=b_size, shuffle=True)
     eos_tok = model.tokenizer.eos_token_id
     eos_tok_str = model.tokenizer.eos_token
     generated = []
-    # print(b_taskVec.shape)
-    # print(repr.shape)
-    
+        
+    #inference loop
     with torch.no_grad():
-        for batch in dataloader:
+        for batch in tqdm(dataloader):
 
             texts = batch["text"]
             ids = batch["id"].detach().cpu().numpy()
@@ -142,17 +155,17 @@ def infer_entities(model, taskVector, dataset, with_context=False, max_tokens = 
             taskVec_idx = rep_idx + 1
             rep_idxs = torch.tensor(b_size * [rep_idx])
             taskVec_idxs = torch.tensor(b_size * [taskVec_idx])
-
+            fwd_hooks = [   
+                            (replace_hook_name, utils.get_replace_with_rep_hook(reps, rep_idxs)), # replace '_' by the subject Representation
+                            (replace_hook_name, utils.get_replace_with_rep_hook(b_taskVec, taskVec_idxs)) # replace 'called' by TaskVec Representation
+                        ]
             #inference
             for i in range(max_tokens):
                     # print(inputs, targets)
                     logits = model.run_with_hooks(
                         inp_toks,
                         return_type = "logits",
-                        fwd_hooks=[
-                            (replace_hook_name, utils.get_replace_with_rep_hook(reps, rep_idxs)), # replace '_' by the subject Representation
-                            (replace_hook_name, utils.get_replace_with_rep_hook(b_taskVec, taskVec_idxs)) # replace 'called' by TaskVec Representation
-                            ]
+                        fwd_hooks=fwd_hooks
                     ,)
 
                     final_logits =  logits[:,-1,:] #extract logits for last token only
@@ -161,18 +174,43 @@ def infer_entities(model, taskVector, dataset, with_context=False, max_tokens = 
 
                     #check if we have reached the end of the sequence
                     if all(new_toks == eos_tok): break
-            
+    
+
+            if return_attn_pattern:
+                n_toks = inp_toks.shape[1]
+                #instanciate the attention pattern
+                attn_patterns = torch.zeros((   b_size,
+                                                model.cfg.n_layers,
+                                                model.cfg.n_heads,
+                                                n_toks, 
+                                                n_toks))
+                def get_attn(
+                    pattern: Float[torch.Tensor, "batch head_index dest_pos source_pos"],
+                    hook,
+                    ):
+                    """Hook function that stores the attention pattern"""
+                    l = int(hook.name.split(".")[1])
+                    attn_patterns[:,l,:,:,:] = pattern.cpu().detach()
+
+                fwd_hooks += [ (hook, get_attn) for hook in pattern_hooks_names]
+                #get the attention patterns for the batch
+                model.run_with_hooks(
+                        inp_toks,
+                        return_type = None,
+                        fwd_hooks=fwd_hooks
+                    ,)
+                #store the attention patterns in the dataset
+                for i in range(b_size):
+                    dataset[ids[i]]["attn_pattern"] = attn_patterns[i]
+
             for i in range(b_size) :
                 gen = model.tokenizer.decode(
                     inp_toks[i,taskVec_idxs[i]+1:].view(-1))
                 # gen = "".join(gen).split(eos_tok_str)[0].strip()
                 gen = gen.split(eos_tok_str)[0].strip()
-                generated.append( {"id":ids[i] , "inferred": gen})
-                # print(generated)
-        #fuse with original dataset
-        for gen in generated:
-             dataset[gen["id"]].update(gen)
-        return 
+                #store the inferred entity
+                dataset[ids[i]]["inferred"] = gen
+        return
  
 METRIC_VERSION = 1.2
 evalFileName = f"Evaluation_{METRIC_VERSION}.json"
@@ -354,7 +392,6 @@ class LearnLabelExtractor(Task):
                     entities_toks = model.to_tokens(entities, prepend_bos=False, padding_side="right")
                     inputs = torch.cat([context_toks, entities_toks], dim=1)
                     rep_idx = context_toks.shape[1] - 2
-
                 else:
                     rep_idx = 1 if prepend_bos else 0 
                     prompts = ["_ > " + ent for ent in entities]
