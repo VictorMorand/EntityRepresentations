@@ -185,7 +185,7 @@ def infer_entities(model,
                                                 n_toks, 
                                                 n_toks))
                 def get_attn(
-                    pattern: Float[torch.Tensor, "batch head_index dest_pos source_pos"],
+                    pattern: torch.Tensor, # batch head_index dest_pos source_pos
                     hook,
                     ):
                     """Hook function that stores the attention pattern"""
