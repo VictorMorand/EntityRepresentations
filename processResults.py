@@ -28,6 +28,9 @@ def loadResults(xp_path):
             job_data["with_context"] = False
         if "dataset_name" not in job_data:
             job_data["dataset_name"] = "WebNLG"
+        if "extraction_method" not in job_data:
+            job_data["extraction_method"] = "after_context"
+
         # params = params["params"]
         # print(job_data)
         hist_path = jobPath / "history.json"
@@ -63,17 +66,27 @@ def loadResults(xp_path):
 
     return pd.DataFrame(results)
 
-def get_inference_res(results, model_name, layer, dataset_name=None, with_context = False):
-    results = results[(results["model_name"] == model_name) & (results["layer"] == layer) & (results["with_context"] == with_context)]
+def get_inference_res(results, 
+                      model_name, 
+                      layer, 
+                      dataset_name=None, 
+                      with_context = False,
+                      extraction_method="in_context",
+                      verbose=False):
+    results = results[(results["model_name"] == model_name) 
+                      & (results["layer"] == layer) 
+                      & (results["with_context"] == with_context)
+                      & (results["extraction_method"] == extraction_method)
+                      ]
     if dataset_name:
         results = results[results["dataset_name"] == dataset_name]
-    print(f"found {len(results)} results for layer {layer} of {model_name} {'with' if with_context else 'without'} context {'on ' + dataset_name if dataset_name else ''}")
+    if verbose: print(f"found {len(results)} results for layer {layer} of {model_name} {'with' if with_context else 'without'} context {'on ' + dataset_name if dataset_name else ''}")
     #get first row dict
     if len(results) == 0:
         return None
     res = results.iloc[0].to_dict()  
     inference_file = res["path"] / res["inference"]
-    print(f"got inference files: {inference_file}")
+    if verbose: print(f"got inference files: {inference_file}")
     #get inference in results for layer
     with open(inference_file) as json_file:
         inference = json.load(json_file)

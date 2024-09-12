@@ -14,14 +14,6 @@ from LabelExtractor import LearnLabelExtractor
 logging.basicConfig(level=logging.DEBUG)
 # logging.getLogger().setLevel(logging.DEBUG) # in order to set experimaestro to debug
 
-# Launchers, here we specify what we need for a task.
-
-# Manual setting
-# launcher = SlurmLauncher()
-# gpulauncher = launcher.config(gpus=1, 
-#                               mem_per_gpu= 22 * 1024, 
-#                               time="60")
-
 
 # Configuration of the whole experiment
 @configuration
@@ -32,6 +24,7 @@ class Configuration(ConfigurationBase):
     batch_size: int = 64
     logs_per_epoch: int = 2
     with_context: bool = False
+    extraction_method: str = "after_context"
     model_name: str = "gpt2-small"
     dataset_name: str = "webNLG"
     layers: dict = {'from':0, 'to':0}
@@ -50,6 +43,7 @@ def run( helper: ExperimentHelper, cfg: Configuration):
         task = LearnLabelExtractor(
                         model_name= tag(cfg.model_name), 
                         dataset_name= tag(cfg.dataset_name), 
+                        extraction_method = tag(cfg.extraction_method),
                         with_context= cfg.with_context,
                         layer=tag(layer), 
                         epochs=cfg.epochs,

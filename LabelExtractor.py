@@ -3,17 +3,22 @@
 
 from typing import List, Optional
 import logging
+import torch, gc, json, os
+from experimaestro import Config, Task, Param, Constant
+#remove HF networks calls that takes an eternity to timeout... We are loading them offline.
+os.environ['HF_EVALUATE_OFFLINE'] = '1'
+os.environ['HF_DATASETS_OFFLINE'] = '1'
+from datasets import load_dataset
+import evaluate
+#compute chrf with HF evaluate package -> https://huggingface.co/spaces/evaluate-metric/chrf 
+chrf = evaluate.load("chrf")  
 import transformer_lens as tl 
 from transformer_lens import HookedTransformer
-from experimaestro import Config, Task, Param, Constant
-from datasets import load_dataset
-import torch, gc, json, os
 from torch.utils.data import DataLoader
 import torch.nn as nn
 import numpy as np
 from tqdm import tqdm
 from pathlib import Path
-import evaluate
 
 ############# utils #############  
 import utils 
@@ -23,7 +28,8 @@ def eval_model(model,
     test_loader, 
     first_token_only=False,
     with_context=False,
-    prepend_bos=True):
+    prepend_bos=True,
+    metric = "acc"):
     """
     Evaluate the model on a given test_loader augmented with representations.
     Args:
@@ -33,6 +39,7 @@ def eval_model(model,
     first_token_only : bool : if True, only the first token of the entity is considered
     with_context : bool : if True, the context is prepended to the entity
     prepend_bos : bool : if True, the entity is prepended with the bos token
+    metric: metric to use, 'acc' or 'loss'
     """
     b_count = 0
     m_acc = 0
@@ -90,7 +97,12 @@ def eval_model(model,
                 ,)
 
             # LM Loss and optimization
-            acc = tl.utils.lm_accuracy(logits[:, rep_idx+1:,:], targets) # implementation here
+            if metric == 'acc':
+                acc = tl.utils.lm_accuracy(logits[:, rep_idx+1:,:], targets) # implementation here
+            elif metric == 'loss':
+                acc = model.loss_fn(logits[:, rep_idx+1:,:], targets)
+            else:
+                raise NotImplementedError(f"{metric} not implemented, can be 'acc' or 'loss'.")
             m_acc += acc.item()
 
     return m_acc / b_count
@@ -215,7 +227,7 @@ def infer_entities(model,
 METRIC_VERSION = 1.2
 evalFileName = f"Evaluation_{METRIC_VERSION}.json"
 
-def compute_metrics(model, TaskVec, test_dataset, max_tokens=10, b_size = 50, with_context=True, prepend_bos=True, force_recompute=True):
+def compute_metrics(model, TaskVec, test_dataset, max_tokens=10, b_size = 5, with_context=True, prepend_bos=True, force_recompute=True, verbose=True):
     """
     Evaluate the model on a given test_set augmented with representations.
     """
@@ -225,7 +237,7 @@ def compute_metrics(model, TaskVec, test_dataset, max_tokens=10, b_size = 50, wi
     if force_recompute or (not "inferred" in test_dataset[0]):
         infer_entities(model, TaskVec, test_dataset, max_tokens=max_tokens, b_size=b_size, with_context=with_context, prepend_bos=prepend_bos)
     
-    for item in tqdm(test_dataset):
+    for item in tqdm(test_dataset, disable= not verbose):
         # print(st(item).replace("', ", "'\n"))
         # prompts = item["prompt"]
         target = item["entity"]
@@ -237,9 +249,7 @@ def compute_metrics(model, TaskVec, test_dataset, max_tokens=10, b_size = 50, wi
             perfect_acc += 1
         if gen_entity in target or target in gen_entity:
             partial_acc += 1
-
-    #compute chrf with HF evaluate package -> https://huggingface.co/spaces/evaluate-metric/chrf 
-    chrf = evaluate.load("chrf")        
+      
     chrf_score = chrf.compute(predictions = [ item['inferred'] for item in test_dataset],
                                references = [ item['entity'] for item in test_dataset])
 
@@ -253,7 +263,7 @@ def compute_metrics(model, TaskVec, test_dataset, max_tokens=10, b_size = 50, wi
 def save_inferences(model_name, layer, test_dataset):
     """ Write inferred entities save in dataset under 'inferrred' key to a json file for further examination.
     """
-    fileName = f'Inference_{model_name}_l{layer}.json'
+    fileName = f'Inference_{model_name.split("/")[-1]}_l{layer}.json'
     generation = [ {
                 "entity": item['entity'], 
                 "generation": item['inferred'],
@@ -269,6 +279,7 @@ class LearnLabelExtractor(Task):
     dataset_name: Param[str]
     layer: Param[int]
     with_context: Param[bool] = False
+    extraction_method: Param[str]       # Can be either 'in_context' 'after_context' 'raw_entity' OR 'average' for baseline
     first_token_only: bool = False
     max_ent_length: Param[int] = 20
     max_length: Param[int] = 200
@@ -276,6 +287,7 @@ class LearnLabelExtractor(Task):
     logs_per_epoch: Param[int] = 3
     lr: Param[float] = 1e-2
     batch_size: Param[int] = 64
+    version: Constant[float] = 1.0      # Can change if code has been updated and need to recompute
 
     def execute(self):
         """Called when this task is run"""
@@ -289,6 +301,7 @@ class LearnLabelExtractor(Task):
                                     fold_ln=False,
                                     fold_value_biases=False,
                                     device_map='auto',
+                                    local_files_only=True,
                                     )
         model.eval()
         dim = model.QK.shape[-1]
@@ -296,7 +309,7 @@ class LearnLabelExtractor(Task):
         ################ DATA  ################
         logging.info(f"loading data from {self.dataset_name} ...")
         
-        max_dev_length = 1000
+        max_dev_length = 2000
 
         if self.dataset_name.lower() == "webnlg":
             dataset = load_dataset("web_nlg", "release_v3.0_en", trust_remote_code=True)
@@ -320,13 +333,20 @@ class LearnLabelExtractor(Task):
             dev_dataset = utils.TacredDataset(dataset["test"], max_ent_length=self.max_ent_length, max_length=200)
             test_dataset = utils.TacredDataset(dataset["validation"], max_ent_length=self.max_ent_length, max_length=200)
 
+        elif self.dataset_name.lower() == "conll2003":
+            ds = load_dataset("eriktks/conll2003", trust_remote_code=True)
+            max_ent_length = 60
+            max_length = 300
+            train_dataset = utils.CoNLLDataset(ds["train"], max_ent_length=max_ent_length,max_length=max_length)
+            dev_dataset = utils.CoNLLDataset(ds["validation"], max_ent_length=max_ent_length,max_length=max_length)
+            test_dataset = utils.CoNLLDataset(ds["test"], max_ent_length=max_ent_length,max_length=max_length)
+
         else: 
             # unknown Dataset 
-            raise NotImplementedError("dataset Name must be either 'webnlg' or 'tacred'")
-
+            raise NotImplementedError("Unknown dataset, can be: 'webnlg' 'tacred' or 'CoNLL2003' ")
 
         #limit the number of samples for testing
-        print(f"initial dev dataset size: {len(dev_dataset.data)}, truncating to {max_dev_length}")
+        logging.info(f"initial dev dataset size: {len(dev_dataset.data)}, truncating to {max_dev_length}")
         dev_dataset.data = list(np.random.choice(dev_dataset.data, max_dev_length, replace=False))
 
         logging.info("loading dataset done !")
@@ -334,37 +354,48 @@ class LearnLabelExtractor(Task):
         logging.info(f"test length: {len(test_dataset)}")
         logging.debug(f"ex sample: {train_dataset[np.random.randint(len(train_dataset))]}")
 
-        logging.info("Augmenting Train set with subject representations ... ")
-        train_dataset.augment_with_repr(model, self.layer, batch_size=self.batch_size)
-        logging.info("Augmenting Test set with subject representations ... ")
-        test_dataset.augment_with_repr(model, self.layer, batch_size=self.batch_size)
-        logging.info("Augmenting dev set with subject representations ... ")
-        dev_dataset.augment_with_repr(model, self.layer, batch_size=self.batch_size)
-        logging.info("Extraction of subjects representatons Done !\n")
+        if self.extraction_method == 'average':
+            #we are doing a baseline average extraction
+            extraction_method = "in_context" #consider only this method for the moment
+            logging.info(f"(BASELINE): Augmenting Train set with AVERAGE subject representations with method {extraction_method}... ")
+            train_dataset.augment_with_avg_repr(model, self.layer, batch_size=self.batch_size, method=extraction_method)
+            logging.info("(BASELINE): Augmenting Test set with AVERAGE subject representations ... ")
+            test_dataset.augment_with_avg_repr(model, self.layer, batch_size=self.batch_size, method=extraction_method)
+            logging.info("(BASELINE): Augmenting dev set with AVERAGE subject representations ... ")
+            dev_dataset.augment_with_avg_repr(model, self.layer, batch_size=self.batch_size, method=extraction_method)
+            logging.info("Extraction of subjects representatons Done !\n")
+        else: 
+            logging.info(f"Augmenting Train set with subject representations with method {self.extraction_method}... ")
+            train_dataset.augment_with_repr(model, self.layer, batch_size=self.batch_size, method=self.extraction_method)
+            logging.info("Augmenting Test set with subject representations ... ")
+            test_dataset.augment_with_repr(model, self.layer, batch_size=self.batch_size, method=self.extraction_method)
+            logging.info("Augmenting dev set with subject representations ... ")
+            dev_dataset.augment_with_repr(model, self.layer, batch_size=self.batch_size, method=self.extraction_method)
+            logging.info("Extraction of subjects representatons Done !\n")
 
         ################ TRAINING ################
-
         dim = model.QK.shape[-1]
         prepend_bos = True
         # create Task Vector
         TaskVec = torch.normal(mean=0, std=1.0, size=(1,dim), requires_grad=True)
+        best_TaskVec = torch.zeros_like(TaskVec)
         hist = []
-        # TaskVec = torch.ones((1,d), requires_grad=True)
 
         for param in model.parameters():
             param.requires_grad = False
 
         logging.info(f"Beging Label extractor Training ...")
-        
         eos_tok_str = model.tokenizer.eos_token
         replace_hook_name = tl.utils.get_act_name('embed') #pos_embed for gpt2 ... 
         logging.info(f"will insert representation at hook '{replace_hook_name}'")
         train_dataloader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=True)
-        dev_dataloader = DataLoader(dev_dataset, batch_size=200, shuffle=True)
+        dev_dataloader = DataLoader(dev_dataset, batch_size=self.batch_size, shuffle=True)
         n_log = len(train_dataloader) // self.logs_per_epoch
         
-
+        len_loader = len(train_dataloader)
         optim = torch.optim.Adam([TaskVec], lr=self.lr)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optim, len_loader, eta_min=self.lr/10)
+
         gc.collect()
         torch.cuda.empty_cache()
 
@@ -416,7 +447,8 @@ class LearnLabelExtractor(Task):
                 optim.step()
                 optim.zero_grad()
                 m_loss += loss.item()
-        
+                scheduler.step()
+
                 if b_count % n_log == 0:
                     m_loss = m_loss / (len(train_dataloader) / self.logs_per_epoch)
                     acc = (eval_model(
@@ -427,23 +459,33 @@ class LearnLabelExtractor(Task):
                             with_context= self.with_context,
                             prepend_bos=prepend_bos))
                     e = epoch + b_count/len(train_dataloader)
-                    hist.append({"epoch":e, "loss": m_loss, "test accuracy": acc})
-                    logging.info(f" Epoch {e:.1f}, Language modeling loss: {m_loss:.3f}, Test Acc: {acc:.3f}")
+                    lr = scheduler.get_last_lr()[0]
+
+                    #save best taskVec according to test accuracy
+                    if hist and acc >= max([h["test accuracy"] for h in hist]):
+                        best_TaskVec[:] = TaskVec[:]
+
+                    hist.append({"epoch":e, "loss": m_loss, "test accuracy": acc, "lr":lr})
+                    logging.info(f"\nEpoch {e:.1f}, LM loss: {m_loss:.3f}, Test Acc: {acc:.3f}, lr:{lr:.4f}")
                     m_loss = 0 # reset
+        logging.info("Training Done !\n")
+        
+        TaskVec = best_TaskVec # retrieve best TaskVec
         
         # Save TaskVector and train history
-        fileName = f'TaskVec_{self.model_name}_l{self.layer}_e{len(hist)}.pth'
+        fileName = f"TaskVec_{self.model_name.split('/')[-1]}_l{self.layer}_e{hist[-1]['epoch']:.1f}.pth"
         torch.save(TaskVec, fileName) 
         
         #Evaluation stage
-
+        logging.info(f"Evaluation on Test Set...")
         metrics = compute_metrics(
                                 model,
                                 TaskVec,
                                 test_dataset,
-                                b_size=100,
+                                b_size=5,
                                 with_context=self.with_context,
                                 prepend_bos=prepend_bos)
+        logging.info("Done !\n")
         logging.info(metrics)
 
         #add metrics to last logging
@@ -470,6 +512,7 @@ class EvalLabelExtractor(Task):
     dataset_name: Param[str]
     layer: Param[int]
     with_context: Param[bool] = False
+    extraction_method: Param[str]
     max_ent_length: Param[int] = 20
     max_length: Param[int] = 200
     batch_size: Param[int] = 64
