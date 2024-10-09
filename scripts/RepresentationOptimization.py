@@ -202,8 +202,8 @@ def train_reps(
     reps = reps.detach().cpu()
     return reps, hist
 
-N0 = len(train_dataset)//4 
-N = len(train_dataset)//4 # number of entities to train
+N0 = 2 * len(train_dataset)//4 
+N = len(train_dataset)//2 # number of entities to train
 num_reps = 4
 N_trials = 30
 lr = 1
@@ -218,8 +218,7 @@ for param in model.parameters():
     param.requires_grad = False
 TaskVec.requires_grad = False
 
-#get random sample
-# random split of whole dataset
+# split of whole dataset
 train_data = train_dataset[N0:N0+N]
 
 # load train data by batch of num_reps

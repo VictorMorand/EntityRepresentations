@@ -9,7 +9,7 @@
 #SBATCH --constraint=v100-32g
 #SBATCH --cpus-per-task=8                   # Number of CPU cores per task
 #SBATCH --gpus-per-node=1                   # Request 1 GPU (can increase if needed)
-#SBATCH --time=06:00:00                     # Time limit (hh:mm:ss), in Jean ZAY < 20h
+#SBATCH --time=10:00:00                     # Time limit (hh:mm:ss), in Jean ZAY < 20h
 
 # Activate Python environment (optional, if using virtualenv or conda)
 source $WORK/envs/env/bin/activate

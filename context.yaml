@@ -5,14 +5,14 @@ description: "Expermimenting how well the model can extract the label from a rep
 # Uses xp_learn.py
 file: xp_learn
 
-epochs: 15
-lr: 2e-2
+epochs: 10
+lr: 4e-2
 batch_size: 30  
 logs_per_epoch: 4
 # launcher: "duration=15h & cuda(mem=30G)*1 & cpu(cores=12)" #v100 32G JZ 
 # launcher: "duration=8h & cuda(mem=45G)*1 & cpu(cores=12)" #a100 80G JZ 
 # launcher: "duration=6h & cuda(mem=15G)*1 & cpu(cores=12)" #v100 16G JZ
-launcher: "duration=11h & cuda(mem=35G)*1 & cpu(cores=12)" #a100 40G JZ 
+launcher: "duration=10h & cuda(mem=35G)*1 & cpu(cores=12)" #a100 40G JZ 
 
 # Experimental parameters
 # model_name: "gpt2-medium" # 24 (0-23) layers
@@ -20,23 +20,25 @@ launcher: "duration=11h & cuda(mem=35G)*1 & cpu(cores=12)" #a100 40G JZ
 # model_name: "gpt2-xl" # 48 (0-47) layers | Need 30 Gb for b_size 30
 # model_name: "gpt2-small"  # 12 (0-11) Transformer layers
 # model_name: "phi-1_5" # 24 (0-23) Transformer layers | limit v100 30G (b_size=30), ok a100 40G 
-# model_name: "phi-2" # 32 (0-31) Transformer layers
-# model_name: "phi-3" # 32 (0-31) Transformer layers
 # model_name: "EleutherAI/pythia-160m" # 12 layer | v100 16G with context ... -> 32G !
 # model_name: "EleutherAI/pythia-1.4b" # 24 layer | v100 ok
 # model_name: "EleutherAI/pythia-2.8b" # 32 layer | a100 40G
 # model_name: "EleutherAI/pythia-6.9b" # 32 layer | v100 ok
 # model_name: "EleutherAI/pythia-410m" # 24 layer | limit ok v100 16G with context ... -> 32G !
-model_name: "EleutherAI/pythia-1b" # 16 layer | ok A100
+# model_name: "phi-3" # 32 (0-31) Transformer layers
+# model_name: "EleutherAI/pythia-1b" # 16 layer | ok A100
+model_name: "phi-2" # 32 (0-31) Transformer layers
 
 # extraction_method: "after_context"
 # extraction_method: "raw_entity"
-# extraction_method: "average" # BASELINE
-extraction_method: "in_context"
+extraction_method: "average" # BASELINE
+# extraction_method: "in_context"
 
 # dataset_name: "TACRED"
 dataset_name: "CoNLL2003"
 with_context: True
 layers: 
     from: -1
-    to: 15
+    to: 31
+
+n_runs: 4
