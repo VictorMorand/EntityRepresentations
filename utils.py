@@ -141,6 +141,18 @@ def get_avg_representation(model: HookedTransformer, prompts, entities, layer:in
     buffer = buffer.sum(dim=1) / mask.sum(dim=1).unsqueeze(-1) #sum over tokens and divide by number of non-zero tokens
     return buffer       #return obtained average representation
 
+def project_on_vocab(model, rep, k=10):
+    """ project a representation on the vocabulary of the model
+    Args:
+        model: the model to use
+        rep: the representation to project
+        k: number of top tokens to return
+    """
+    logits = torch.tensor(rep).float().cuda() @ model.W_U
+    topk_inds = torch.topk(logits, k).indices
+    topk_tokens = model.tokenizer.convert_ids_to_tokens(topk_inds.cpu().numpy())
+    return topk_tokens
+
 
 def generate_from_repr( model, 
                         repr, 
@@ -253,7 +265,7 @@ class EntityReprDataset(Dataset):
     def __getitem__(self, idx):
         return self.data[idx]
         
-    def augment_with_repr(self, model, layer, batch_size, method="after_context"):
+    def augment_with_repr(self, model, layer, batch_size, method="after_context", verbose=True):
         """
         augment the dataset with extracted representations in given model at given hook
         Args:
@@ -270,7 +282,7 @@ class EntityReprDataset(Dataset):
         dataloader = DataLoader(self.data, batch_size=batch_size, shuffle=False)
 
         with torch.no_grad():
-            for batch in tqdm(dataloader):
+            for batch in tqdm(dataloader, disable = not verbose):
                 texts = batch["text"]
                 entities = batch["entity"]
                 ids = batch["id"].detach().cpu().numpy()
@@ -300,7 +312,7 @@ class EntityReprDataset(Dataset):
         torch.cuda.empty_cache()
         self.data =  [item | new_data[item["id"]] for item in self.data]
 
-    def augment_with_avg_repr(self, model, layer, batch_size, method="after_context"):
+    def augment_with_avg_repr(self, model, layer, batch_size, method="after_context", verbose:bool = True):
         """
         (/!\ Baseline) Augment the dataset with average representations of entities in given model at given layer
         Args:
@@ -316,7 +328,7 @@ class EntityReprDataset(Dataset):
         dataloader = DataLoader(self.data, batch_size=batch_size, shuffle=False)
 
         with torch.no_grad():
-            for batch in tqdm(dataloader):
+            for batch in tqdm(dataloader, disable = not verbose):
                 texts = batch["text"]
                 entities = batch["entity"]
                 ids = batch["id"].detach().cpu().numpy()
