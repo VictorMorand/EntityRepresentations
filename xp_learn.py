@@ -9,7 +9,7 @@ from experimaestro.launcherfinder import find_launcher
 from experimaestro.launchers.slurm import SlurmLauncher
 
 # import task
-from LabelExtractor import LearnLabelExtractor
+from LabelExtractor import LearnLabelExtractor, LEARNER_VERSION
 
 logging.basicConfig(level=logging.DEBUG)
 # logging.getLogger().setLevel(logging.DEBUG) # in order to set experimaestro to debug
@@ -22,6 +22,7 @@ class Configuration(ConfigurationBase):
     launcher: str =  """duration=3h & cuda(mem=11G)*1 & cpu(cores=8)"""
     lr: float = 1e-2
     batch_size: int = 64
+    n_runs: int = 1
     logs_per_epoch: int = 2
     with_context: bool = False
     extraction_method: str = "after_context"
@@ -40,7 +41,8 @@ def run( helper: ExperimentHelper, cfg: Configuration):
     layers = range(cfg.layers["from"],cfg.layers["to"] + 1)
     logging.info(f"will launch jobs for layers {layers} of {cfg.model_name} ")
     for layer in layers:
-        task = LearnLabelExtractor(
+        for run in range(cfg.n_runs):
+            task = LearnLabelExtractor(
                         model_name= tag(cfg.model_name), 
                         dataset_name= tag(cfg.dataset_name), 
                         extraction_method = tag(cfg.extraction_method),
@@ -50,8 +52,9 @@ def run( helper: ExperimentHelper, cfg: Configuration):
                         lr=cfg.lr,
                         logs_per_epoch = cfg.logs_per_epoch,
                         batch_size = cfg.batch_size,
+                        run = run,
                         )
-        tasks[tagspath(task)] =  task.submit(launcher=gpulauncher).jobpath
+            tasks[tagspath(task)] =  task.submit(launcher=gpulauncher).jobpath
 
     # Build a central "runs" directory to plot easily the metrics
     runpath = helper.xp.resultspath / "runs"
