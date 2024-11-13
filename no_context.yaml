@@ -1,26 +1,45 @@
 id: label_extractor
 title: "Label Extractor"
-description: "full config experiment for Mistral 7B"
+description: "Label Generation witouth context Experiment"
 
 # Uses xp_learn.py
 file: xp_learn
 
 epochs: 10
-lr: 2e-2
-batch_size: 60
-logs_per_epoch: 2
-# launcher: "duration=5h & cuda(mem=45G)*1 & cpu(cores=8)" # A100 JZ
-launcher: "duration=3h & cuda(mem=24G)*1 & cpu(cores=8)"    #v100 JZ
+lr: 5e-2
+batch_size: 50
+logs_per_epoch: 4
+# launcher: "duration=5h & cuda(mem=11G)*1 & cpu(cores=12)" # v100 16G JZ
+# launcher: "duration=8h & cuda(mem=24G)*1 & cpu(cores=24)"   # v100 32G JZ
+launcher: "duration=8h & cuda(mem=35G)*1 & cpu(cores=12)" # A100 40G JZ
+# launcher: "duration=5h & cuda(mem=55G)*1 & cpu(cores=12)" # A100 80Gb JZ
 
 # Experimental parameters
 # model_name: "gpt2-small" # 12 (0-11) Transformer layers
 # model_name: "gpt2-medium" # 24 (0-23) Transformer layers
-# model_name: "phi-2" # 32 (0-31) Transformer layers
 # model_name: "mistral-7B" # 32 (0-31) Transformer layers
 # model_name: "gpt2-xl" # 48 (0-47) Transformer layers
-model_name: "gpt2-medium" # 36 (0-35) Transformer layers
-dataset_name: "WebNLG" 
-with_context: False 
+# model_name: "gpt2-medium" # 36 (0-35) Transformer layers
+# model_name: "EleutherAI/pythia-1.4b" # 24 layers | ok v100 32G
+# model_name: "EleutherAI/pythia-1b" # 16 layers   | ok v100 32G
+# model_name: "EleutherAI/pythia-160m" # 12 layers | ok v100 16G
+# model_name: "EleutherAI/pythia-410m" # 24 layers | ok v100 16G
+# model_name: "phi-1_5" # 24 (0-23) layers | v100 30G
+# model_name: "EleutherAI/pythia-2.8b" # 24 layers | ok v100 32G
+# model_name: "EleutherAI/pythia-6.9b" # 32 layers | float16 = 14Gb raw on gpu
+# model_name: "phi-2" # 32 (0-31) Transformer layers, ok v100 32G
+model_name: "phi-3" # 32 (0-31) Transformer layers
+
+
+# extraction_method: "after_context"
+# extraction_method: "raw_entity"
+# extraction_method: "average" # BASELINE
+extraction_method: "in_context"
+
+# dataset_name: "TACRED"
+dataset_name: "CoNLL2003"
+with_context: False
+
 layers: 
     from: -1
-    to: 6
+    to: 31
