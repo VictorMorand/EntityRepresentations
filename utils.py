@@ -1,3 +1,7 @@
+""" author: Victor Morand
+This script gathers all the common functions that I use throughout my various projects, 
+it helps keeping my code and workspace clean 
+"""
 from transformer_lens import HookedTransformer, utils
 from datasets import load_dataset
 import torch, os, gc, re
@@ -11,6 +15,28 @@ from importlib import reload
 from typing import List, Dict, Any
 
 
+########################################################################
+############################## Parameters ##############################
+
+checkpoints_folder = ""
+data_folder = ""
+
+########################################################################
+
+############################## FUNCTIONS ##############################
+
+def load_model(model_name, dtype = torch.float32):
+    """use same parameters to load models from Tlens, otherwise there are possible differences"""
+    return HookedTransformer.from_pretrained(
+                                model_name, 
+                                trust_remote_code=True, 
+                                low_cpu_mem_usage = True, 
+                                fold_ln=False,
+                                fold_value_biases=False,
+                                device_map='auto',
+                                dtype=dtype,
+                                local_files_only=True,
+                                )
 
 # place a hook to replace representation of "_" 
 def get_replace_with_rep_hook(reps, inds): 
@@ -31,12 +57,12 @@ def get_replace_with_rep_hook(reps, inds):
     return lambda tensor, hook: replace_with_rep(tensor, reps, inds)
 
 def get_representation(model: HookedTransformer, tokens, token_inds, layer:int, hooks:list = [], verbose:bool=False ):
-    """extract model representation of token [token_inds] at layer [layer]
+    """Extract model representation of token `token_inds` at layer `layer` from batch
     Args:
         model: HookedTransformer form TransformerLens to extract representations from
         tokens: tensor(batch, N) tokenized texts to process
         token_inds: (batch) index of tokens where to extract representation
-        hooks: (Optionnal) List [(hook_name, hook_fx)] hoooks that will also be placed on the model during computation
+        hooks: (Optionnal) List [(hook_name, hook_fx)] hooks that will also be placed on the model during computation
         layer: layer at which to retreive the representations
     """ 
 
@@ -153,7 +179,6 @@ def project_on_vocab(model, rep, k=10):
     topk_tokens = model.tokenizer.convert_ids_to_tokens(topk_inds.cpu().numpy())
     return topk_tokens
 
-
 def generate_from_repr( model, 
                         repr, 
                         taskVector = None, 
@@ -225,6 +250,32 @@ def generate_from_repr( model,
             return model.to_str_tokens(inp_toks)
         else: 
             return model.tokenizer.decode(inp_toks.view(-1).tolist()[1:])
+
+def sample_random_entities(model, dataset, n=3):
+    """BASELINE: Creates a new dataset with random sampled spans as entities. 
+    for each row, Sample n successive tokens in the given context
+    Args:
+        dataset : dataset object
+        n : number of tokens to extract
+    """
+    new_dataset = []
+    for row in tqdm(dataset):
+        
+        tokens = model.to_tokens(row["text"]).view(-1)
+        
+        #if not enough tokens, remove the row
+        if len(tokens) <= n+1: continue
+
+        end = np.random.randint(n+1, len(tokens)) # don't sample eos token
+        toks = tokens[end-n:end]
+        entity = model.tokenizer.decode(toks)
+        new_dataset.append( { 
+            "text": row["text"],
+            "entity": entity,
+            })
+    
+    return EntityReprDataset(new_dataset)
+
 
 ############################## DATASETS ##############################
 class EntityReprDataset(Dataset):
@@ -539,8 +590,9 @@ def load_datasets(dataset_name, max_ent_length=20):
         dataset = load_dataset("web_nlg", "release_v3.0_en", trust_remote_code=True)
 
         #optionnal, filter categories from datset
-        cat = ['Food'] #WebNLG Categories to remove because too specific
-        # cat = None
+        # cat = ['Food'] #WebNLG Categories to remove because too specific
+        cat = None
+
         if cat :
             dataset["train"] = [item for item in dataset["train"] if item["category"] not in cat]
             dataset["dev"] = [item for item in dataset["dev"] if item["category"] not in cat]

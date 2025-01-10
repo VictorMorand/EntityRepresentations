@@ -1,0 +1,37 @@
+id: learn_linear
+title: "Learn inear layer"
+description: "Learn a linear layer before label extraction"
+
+# Uses xp_learn_linear.py
+file: xp_learn_linear
+
+# Experimental parameters
+jobs_path: "/lustre/fswork/projects/rech/cdt/uqo57sk/experiments/jobs/labelextractor.learnlabelextractor"
+model_names: [
+    # "gpt2-small",  # 12 (0-11) Transformer layers
+    # "gpt2-medium",  # 24 (0-23) Transformer layers
+    # "gpt2-large" # 36 (0-35) Transformer layers
+    # "gpt2-xl",  # 48 (0-47) Transformer layers
+    # "mistral-7B",  # 32 (0-31) Transformer layers
+    "phi-2",  # 32 (0-31) Transformer layers
+    ]
+
+# with_context: True
+with_context: False
+
+launchers: [
+    # "duration=9h & cuda(mem=35G)*1 & cpu(cores=12)", # A100 JZ
+    "duration=5h & cuda(mem=26G)*1 & cpu(cores=12)",    #v100 JZ
+    ]
+
+epochs: 10
+lr: 1e-2
+batch_size: 30
+logs_per_epoch: 4
+
+# extraction_method: "in_context"
+extraction_method: "average"
+
+# dataset_name: "WebNLG"
+dataset_name: "CoNLL2003"
+

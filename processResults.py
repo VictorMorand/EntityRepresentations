@@ -90,7 +90,7 @@ def get_inference_res(results,
                       ]
     if dataset_name:
         results = results[results["dataset_name"] == dataset_name]
-    if verbose: print(f"found {len(results)} results for layer {layer} of {model_name} {'with' if with_context else 'without'} context {'on ' + dataset_name if dataset_name else ''}")
+    if verbose: print(f"found {len(results)} results for layer {layer} of {model_name} {'with' if with_context else 'without'} context {'on ' + dataset_name if dataset_name else ''} with method {extraction_method}.")
     #get first row dict
     if len(results) == 0:
         return None
@@ -102,15 +102,20 @@ def get_inference_res(results,
         inference = json.load(json_file)
     return inference 
 
-def get_taskVec(results, model_name, layer, dataset_name=None, with_context = False, verbose:bool=True):
+def get_taskVec(results, model_name, layer, 
+                dataset_name=None, 
+                with_context = False, 
+                extraction_method="in_context",
+                verbose:bool=True):
     results = results[(results["model_name"] == model_name) & 
                       (results["layer"] == layer) & 
                       (results["with_context"] == with_context) &
+                      (results["extraction_method"] == extraction_method) &
                       (results["Eval"].notna())
                       ]
     if dataset_name:
         results = results[results["dataset_name"] == dataset_name]
-    if verbose: print(f"found {len(results)} jobs for layer {layer} of {model_name} {'with' if with_context else 'without'} context {'on ' + dataset_name if dataset_name else ''}")
+    if verbose: print(f"found {len(results)} jobs for layer {layer} of {model_name} {'with' if with_context else 'without'} context {'on ' + dataset_name if dataset_name else ''} with method {extraction_method}.")
     #get first row dict
     if len(results) == 0:
         return None

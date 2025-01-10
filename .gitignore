@@ -6,4 +6,5 @@ __pycache__/
 /experiments
 plots/
 checkpoints/
+datasets/
 scripts/RelExtractionResults/
