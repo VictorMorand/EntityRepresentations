@@ -91,7 +91,8 @@ def train_TaskVec(model,
         log_per_epoch=2, 
         hist=None,
         prepend_bos=True, 
-        first_token_only = False
+        first_token_only = False,
+        verbose = True
         ):
     """ Train the TaskVec on the train_dataset and test on the test_dataset. 
     Args:
@@ -139,7 +140,7 @@ def train_TaskVec(model,
         epoch += last_epoch
         b_count = 0
         m_loss = 0
-        for batch in tqdm(train_dataloader):
+        for batch in tqdm(train_dataloader, disable=not verbose):
             # print( batch)
             b_count += 1
             entities = batch["entity"]
@@ -240,20 +241,21 @@ json_file = "landmark_in_country.json"
 N_train = 50
 
 #Exctaction method
-method = 'average'
 method = 'in_context'
+method = 'average'
 
 # Use the pretrained TaskVec as starting point for relation extraction taskVec
-use_pretrained = False
 use_pretrained = True       #converges faster
+use_pretrained = False
 
 # OPTIONALLY Filter Subject representations
+filter_subject_reps = False
 filter_subject_reps = True
 
 # Training Params
-lr = 1e-2
+lr = 5e-3
 batch_size = 5
-epochs = 20
+epochs = 30
 log_per_epoch = 2
 
 ################################################################### 
@@ -354,7 +356,7 @@ print("Common subjects: ", len(train_subjects.intersection(test_subjects)))
 
 perfs = []
 ### TRAINING FOR EACH LAYER
-for layer in range(1):# model.cfg.n_layers):
+for layer in range(model.cfg.n_layers):
     print('\n' + f"   layer {layer}, method {method}   ".center(100,'#') + '\n')
     # Augment with representations 
     print(f"- Augmenting train set with method {method}...")
@@ -404,6 +406,7 @@ for layer in range(1):# model.cfg.n_layers):
     train_dataset = [{
         "representation": it[repr_key],
         "subject": it[entity_key],
+        "object": it[target_key], 
         "entity": it[target_key], 
         "text" : it['text'],
         "id" : i,
@@ -412,10 +415,12 @@ for layer in range(1):# model.cfg.n_layers):
     test_dataset = [{
         "representation": it[repr_key],
         "subject": it[entity_key],
+        "object": it[target_key], 
         "entity": it[target_key], 
         "text" : it['text'],
         "id" : i,
         } for i, it in enumerate(test_dataset)]
+
 
 
     # create Task Vector
@@ -459,8 +464,10 @@ for layer in range(1):# model.cfg.n_layers):
     plt.yscale('log')
     #add athoer y axis for lr   
     plt.twinx()
-    plt.ylabel("Learning rate")
-    plt.plot([it['lr'] for it in hist], color='r')
+    plt.ylabel("Accuracy")
+    # plt.plot([it['lr'] for it in hist], color='r')
+    plt.plot([it['test accuracy'] for it in hist], color='r')
+
 
     plt.grid()
     plt.title(f"Training loss for {model_name}")
@@ -497,7 +504,8 @@ for layer in range(1):# model.cfg.n_layers):
     
     perfs.append(data)
 
-save_path = lambda i: f"./RelExtraction_{data_name}_{model_name}_{method}_TV{'_cleaned' if filter_subject_reps else ''}_{i}.json"
+save_file = lambda i: f"RelExtraction_{data_name}_{model_name}_{method}_TV{'_cleaned' if filter_subject_reps else ''}_{i}.json"
+save_path = lambda i: Path("scripts") / "RelExtractionResults" / save_file(i)
 i = 0 
 while os.path.exists(save_path(i)):
     i += 1

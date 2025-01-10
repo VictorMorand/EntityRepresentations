@@ -1,3 +1,7 @@
+""" author: Victor Morand
+This script gathers all the common functions that I use throughout my various projects, 
+it helps keeping my code and workspace clean 
+"""
 from transformer_lens import HookedTransformer, utils
 from datasets import load_dataset
 import torch, os, gc, re
@@ -11,6 +15,78 @@ from importlib import reload
 from typing import List, Dict, Any
 
 
+########################################################################
+############################## Parameters ##############################
+
+checkpoints_folder = ""
+data_folder = ""
+
+########################################################################
+
+############################## FUNCTIONS ##############################
+
+def load_model(model_name, dtype = torch.float32):
+    """use same parameters to load models from Tlens, otherwise there are possible differences"""
+    return HookedTransformer.from_pretrained(
+                                model_name, 
+                                trust_remote_code=True, 
+                                low_cpu_mem_usage = True, 
+                                fold_ln=False,
+                                fold_value_biases=False,
+                                device_map='auto',
+                                dtype=dtype,
+                                local_files_only=True,
+                                )
+
+# we use the following function to truncate the computation of the transformer to a given layer
+def compute_to_layer(model, layer, tokens, verbose:bool = False):
+    """Compute the transformer up to a given layer, return the hidden states
+    Args:
+        model: HookedTransformer from TransformerLens
+        layer: layer to compute the transformer up to
+        tokens (tensor 'batch, seq'): tokens to compute the transformer on
+    Returns:
+        hidden_states: tensor of shape (batch, len, dim) with the hidden states at the given layer
+    """
+
+    dim = model.QK.shape[-1]
+    b_size = tokens.shape[0]
+    seq = tokens.shape[-1]
+    dtype = model.W_U.dtype
+    buffer = torch.zeros(b_size, seq, dim, dtype = dtype)       #create buffer where to store representations
+    
+    if layer < 0:
+        #baseline, extract embedding only
+        hook_name = utils.get_act_name('embed')
+    else:        
+        hook_name = utils.get_act_name('resid_post', layer=layer)   # get hook name for the layer output 
+        
+    if verbose: print(f"compute hidden states at hook {hook_name}")
+    
+    def save_activation(tensor, buffer):
+        """Save wanted activation in buffer
+        Args:
+            tensor: the act cache to modify
+            buffer (Tensor): the buffer where to store the wanted activations
+            inds (List): the token index that we want to overwrite 
+        """
+        #just store the wanted activations in the buffer
+        buffer[:] = tensor
+        # stop the forward pass
+        raise ValueError("Stopping the forward pass")
+    
+    with torch.no_grad():
+        #run the model with the hook
+        try: 
+            model.run_with_hooks(
+                tokens,
+                return_type=None,
+                fwd_hooks = [(hook_name, lambda tensor, hook: save_activation(tensor, buffer) )],
+            )
+        except ValueError as e:
+            if verbose: print(f"Caught exception {e}")
+    return buffer
+    #run the model with the hook
 
 # place a hook to replace representation of "_" 
 def get_replace_with_rep_hook(reps, inds): 
@@ -31,7 +107,7 @@ def get_replace_with_rep_hook(reps, inds):
     return lambda tensor, hook: replace_with_rep(tensor, reps, inds)
 
 def get_representation(model: HookedTransformer, tokens, token_inds, layer:int, hooks:list = [], verbose:bool=False ):
-    """extract model representation of token [token_inds] at layer [layer]
+    """Extract model representation of token `token_inds` at layer `layer` from batch
     Args:
         model: HookedTransformer form TransformerLens to extract representations from
         tokens: tensor(batch, N) tokenized texts to process
@@ -153,7 +229,6 @@ def project_on_vocab(model, rep, k=10):
     topk_tokens = model.tokenizer.convert_ids_to_tokens(topk_inds.cpu().numpy())
     return topk_tokens
 
-
 def generate_from_repr( model, 
                         repr, 
                         taskVector = None, 
@@ -225,6 +300,32 @@ def generate_from_repr( model,
             return model.to_str_tokens(inp_toks)
         else: 
             return model.tokenizer.decode(inp_toks.view(-1).tolist()[1:])
+
+def sample_random_entities(model, dataset, n=3):
+    """BASELINE: Creates a new dataset with random sampled spans as entities. 
+    for each row, Sample n successive tokens in the given context
+    Args:
+        dataset : dataset object
+        n : number of tokens to extract
+    """
+    new_dataset = []
+    for row in tqdm(dataset):
+        
+        tokens = model.to_tokens(row["text"]).view(-1)
+        
+        #if not enough tokens, remove the row
+        if len(tokens) <= n+1: continue
+
+        end = np.random.randint(n+1, len(tokens)) # don't sample eos token
+        toks = tokens[end-n:end]
+        entity = model.tokenizer.decode(toks)
+        new_dataset.append( { 
+            "text": row["text"],
+            "entity": entity,
+            })
+    
+    return EntityReprDataset(new_dataset)
+
 
 ############################## DATASETS ##############################
 class EntityReprDataset(Dataset):
@@ -539,8 +640,9 @@ def load_datasets(dataset_name, max_ent_length=20):
         dataset = load_dataset("web_nlg", "release_v3.0_en", trust_remote_code=True)
 
         #optionnal, filter categories from datset
-        cat = ['Food'] #WebNLG Categories to remove because too specific
-        # cat = None
+        # cat = ['Food'] #WebNLG Categories to remove because too specific
+        cat = None
+
         if cat :
             dataset["train"] = [item for item in dataset["train"] if item["category"] not in cat]
             dataset["dev"] = [item for item in dataset["dev"] if item["category"] not in cat]

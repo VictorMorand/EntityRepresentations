@@ -374,6 +374,25 @@ class LearnLabelExtractor(Task):
             logging.info("(BASELINE): Augmenting dev set with AVERAGE subject representations ... ")
             dev_dataset.augment_with_avg_repr(model, self.layer, batch_size=self.batch_size, method=extraction_method)
             logging.info("Extraction of subjects representatons Done !\n")
+
+        elif self.extraction_method == 'random_sample':
+            extraction_method = "in_context" #consider only this method for the moment
+            n = 3
+            #TODO, implement this for other lengths -> need to add a parameter to experiment...
+            logging.info(f"BASELINE: Sampling random spans of {n} tokens in texts and extracting reps with method {extraction_method}... ")
+            train_dataset = utils.sample_random_entities(model, train_dataset, n=n)
+            logging.info(f"Augmenting Train set with subject representations with method {self.extraction_method}... ")
+            train_dataset.augment_with_repr(model, self.layer, batch_size=self.batch_size, method=extraction_method)
+
+            test_dataset = utils.sample_random_entities(model, test_dataset, n=n)
+            logging.info("Augmenting Test set with subject representations ... ")
+            test_dataset.augment_with_repr(model, self.layer, batch_size=self.batch_size, method=extraction_method)
+
+            dev_dataset = utils.sample_random_entities(model, dev_dataset, n=n)
+            logging.info("Augmenting dev set with subject representations ... ")
+            dev_dataset.augment_with_repr(model, self.layer, batch_size=self.batch_size, method=extraction_method)
+            logging.info("Extraction of subjects representatons Done !\n")
+
         else: 
             logging.info(f"Augmenting Train set with subject representations with method {self.extraction_method}... ")
             train_dataset.augment_with_repr(model, self.layer, batch_size=self.batch_size, method=self.extraction_method)
@@ -394,7 +413,7 @@ class LearnLabelExtractor(Task):
         for param in model.parameters():
             param.requires_grad = False
 
-        logging.info(f"Beging Label extractor Training ...")
+        logging.info(f"Begining Task Vector Training ...")
         eos_tok_str = model.tokenizer.eos_token
         replace_hook_name = tl.utils.get_act_name('embed') #pos_embed for gpt2 ... 
         logging.info(f"will insert representation at hook '{replace_hook_name}'")
@@ -471,7 +490,6 @@ class LearnLabelExtractor(Task):
                             prepend_bos=prepend_bos))
                     e = epoch + b_count/len(train_dataloader)
                     lr = scheduler.get_last_lr()[0]
-
                     #save best taskVec according to test accuracy
                     if hist and acc >= max([h["test accuracy"] for h in hist]):
                         best_TaskVec[:] = TaskVec[:]
