@@ -36,7 +36,7 @@ def get_representation(model: HookedTransformer, tokens, token_inds, layer:int, 
         model: HookedTransformer form TransformerLens to extract representations from
         tokens: tensor(batch, N) tokenized texts to process
         token_inds: (batch) index of tokens where to extract representation
-        hooks: (Optionnal) List [(hook_name, hook_fx)] hoooks that will also be placed on the model during computation
+        hooks: (Optionnal) List [(hook_name, hook_fx)] hooks that will also be placed on the model during computation
         layer: layer at which to retreive the representations
     """ 
 
