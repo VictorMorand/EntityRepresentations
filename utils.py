@@ -38,6 +38,56 @@ def load_model(model_name, dtype = torch.float32):
                                 local_files_only=True,
                                 )
 
+# we use the following function to truncate the computation of the transformer to a given layer
+def compute_to_layer(model, layer, tokens, verbose:bool = False):
+    """Compute the transformer up to a given layer, return the hidden states
+    Args:
+        model: HookedTransformer from TransformerLens
+        layer: layer to compute the transformer up to
+        tokens (tensor 'batch, seq'): tokens to compute the transformer on
+    Returns:
+        hidden_states: tensor of shape (batch, len, dim) with the hidden states at the given layer
+    """
+
+    dim = model.QK.shape[-1]
+    b_size = tokens.shape[0]
+    seq = tokens.shape[-1]
+    dtype = model.W_U.dtype
+    buffer = torch.zeros(b_size, seq, dim, dtype = dtype)       #create buffer where to store representations
+    
+    if layer < 0:
+        #baseline, extract embedding only
+        hook_name = utils.get_act_name('embed')
+    else:        
+        hook_name = utils.get_act_name('resid_post', layer=layer)   # get hook name for the layer output 
+        
+    if verbose: print(f"compute hidden states at hook {hook_name}")
+    
+    def save_activation(tensor, buffer):
+        """Save wanted activation in buffer
+        Args:
+            tensor: the act cache to modify
+            buffer (Tensor): the buffer where to store the wanted activations
+            inds (List): the token index that we want to overwrite 
+        """
+        #just store the wanted activations in the buffer
+        buffer[:] = tensor
+        # stop the forward pass
+        raise ValueError("Stopping the forward pass")
+    
+    with torch.no_grad():
+        #run the model with the hook
+        try: 
+            model.run_with_hooks(
+                tokens,
+                return_type=None,
+                fwd_hooks = [(hook_name, lambda tensor, hook: save_activation(tensor, buffer) )],
+            )
+        except ValueError as e:
+            if verbose: print(f"Caught exception {e}")
+    return buffer
+    #run the model with the hook
+
 # place a hook to replace representation of "_" 
 def get_replace_with_rep_hook(reps, inds): 
     

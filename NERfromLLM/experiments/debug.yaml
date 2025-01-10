@@ -1,0 +1,19 @@
+id: NERfromLLM
+title: "Training"
+description: "Training a custom low rank self attention layer to extract NER skills from LLMs"
+
+# Uses xp_learn.py
+file: xp_learn
+
+# Just debugging
+epochs: 6
+lr: 1e-2
+batch_size: 30
+n_log: 100
+
+# Experimental parameters
+model_name: "phi-1_5" # 12 (0-11) Transformer layers
+# model_name: "phi-2" # 12 (0-11) Transformer layers
+layers: 
+    from: 1
+    to: 2
