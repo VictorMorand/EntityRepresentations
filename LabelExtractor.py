@@ -287,7 +287,7 @@ class LearnLabelExtractor(Task):
     with_context: Param[bool] = False
     extraction_method: Param[str]       # Can be either 'in_context' 'after_context' 'raw_entity' OR 'average' for baseline
     first_token_only: bool = False
-    max_ent_length: Param[int] = 20
+    max_ent_length: Param[int] = 20 
     max_length: Param[int] = 200
     epochs: Param[int] = 5
     logs_per_epoch: Param[int] = 3

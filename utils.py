@@ -1,6 +1,5 @@
 """ author: Victor Morand
 This script gathers all the common functions that I use throughout my various projects, 
-it helps keeping my code and workspace clean 
 """
 from transformer_lens import HookedTransformer, utils
 from datasets import load_dataset
@@ -11,8 +10,6 @@ from torch.utils.data import DataLoader, Dataset
 import torch.nn as nn
 from tqdm import tqdm
 import numpy as np
-from importlib import reload
-from typing import List, Dict, Any
 
 
 ########################################################################
