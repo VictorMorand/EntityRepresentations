@@ -1,6 +1,8 @@
 id: label_extractor
 title: "Label Extractor"
 description: "Label Generation witouth context Experiment"
+pythonpath: 
+    - .././
 
 # Uses xp_learn.py
 file: xp_learn

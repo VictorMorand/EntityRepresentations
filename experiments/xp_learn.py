@@ -1,6 +1,6 @@
 #Author : Victor MORAND
 # 
-import logging
+import os, logging
 from typing import List, Optional
 from experimaestro.experiments import ExperimentHelper, configuration
 from experimaestro import tag, tagspath
@@ -63,5 +63,6 @@ def run( helper: ExperimentHelper, cfg: Configuration):
     for key, jobath in tasks.items():
         path = (runpath / key)
         if path.exists():
-            path.unlink()
+            # remove the old symlink
+            os.remove(path)
         path.symlink_to(jobath)

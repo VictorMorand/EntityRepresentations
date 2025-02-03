@@ -1,6 +1,8 @@
 id: label_extractor
 title: "Label Extractor"
 description: "Debug onfiguration for the label extraction experiment"
+pythonpath: 
+    - .././
 
 # Uses xp_learn.py
 file: xp_learn

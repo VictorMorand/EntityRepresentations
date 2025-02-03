@@ -331,7 +331,7 @@ class EntityReprDataset(Dataset):
         Args:
             data: list of dicts containing at least "text" and "entity" keys. 
             max_ent_length: filter entities whose span is bigger than this.
-            max_length: maximum length of the text
+            max_length: maximum length of the text (in chars)
         """
 
         #sanity checks
@@ -410,7 +410,7 @@ class EntityReprDataset(Dataset):
         torch.cuda.empty_cache()
         self.data =  [item | new_data[item["id"]] for item in self.data]
 
-    def augment_with_avg_repr(self, model, layer, batch_size, method="after_context", verbose:bool = True):
+    def augment_with_avg_repr(self, model, layer, batch_size, method="in_context", verbose:bool = True):
         """
         (/!\ Baseline) Augment the dataset with average representations of entities in given model at given layer
         Args:
@@ -630,7 +630,7 @@ def load_datasets(dataset_name, max_ent_length=20):
         max_ent_length = 60
         max_length = 300
         train_dataset = CoNLLDataset(ds["train"], max_ent_length=max_ent_length,max_length=max_length)
-        dev_dataset = CoNLLDataset(ds["validation"], max_ent_length=max_ent_length,max_length=max_length)
+        val_dataset = CoNLLDataset(ds["validation"], max_ent_length=max_ent_length,max_length=max_length)
         test_dataset = CoNLLDataset(ds["test"], max_ent_length=max_ent_length,max_length=max_length)
 
     elif dataset_name.lower() == "webnlg":
@@ -647,17 +647,17 @@ def load_datasets(dataset_name, max_ent_length=20):
 
         # Create dataset instances
         train_dataset = WebNLGDataset(dataset['train'], max_ent_length=max_ent_length)
-        dev_dataset = WebNLGDataset(dataset['dev'], max_ent_length=max_ent_length)
+        val_dataset = WebNLGDataset(dataset['dev'], max_ent_length=max_ent_length)
         test_dataset = WebNLGDataset(dataset['test'], max_ent_length=max_ent_length)
 
     elif dataset_name.lower() == "tacred":
         dataset = load_dataset("AmirLayegh/tacred_text_label")
         train_dataset = TacredDataset(dataset["train"], max_ent_length=max_ent_length, max_length=200)
-        dev_dataset = TacredDataset(dataset["test"], max_ent_length=max_ent_length, max_length=200)
+        val_dataset = TacredDataset(dataset["test"], max_ent_length=max_ent_length, max_length=200)
         test_dataset = TacredDataset(dataset["validation"], max_ent_length=max_ent_length, max_length=200)
 
     else: 
         # unknown Dataset 
         raise NotImplementedError("Unknown dataset, can be: 'webnlg' 'tacred' or 'CoNLL2003' ")
 
-    return train_dataset, test_dataset, dev_dataset
+    return train_dataset, test_dataset, val_dataset

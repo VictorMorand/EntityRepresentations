@@ -1,6 +1,8 @@
 id: learn_linear
 title: "Learn inear layer"
 description: "Learn a linear layer before label extraction"
+pythonpath: 
+    - .././
 
 # Uses xp_learn_linear.py
 file: xp_learn_linear

@@ -1,6 +1,8 @@
 id: label_extractor_eval
 title: "Label Extractor evaluation"
 description: "Full config for evaluation experiment"
+pythonpath: 
+    - .././
 
 # Uses xp_evaluation.py
 file: xp_evaluation
