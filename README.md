@@ -18,6 +18,7 @@ and then install the requirements
 pip install -r requirements.txt
 ```
 
-## Demo
-See The notebook `EntityRepresentations.ipynb` for a walkthrough.
+## Demo Usage
+See The notebook `Demo.ipynb` for a walkthrough as well as a demo of the Entity Lens Method.
+The Notebook `EntityRepresentations.ipynb` contains the raw code for many experimentatations.
 
