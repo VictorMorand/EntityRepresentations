@@ -121,7 +121,7 @@ def get_taskVec(results, model_name, layer,
         return None
     
     res = results.iloc[0].to_dict()  
-    files = [file for file in os.listdir(res["path"]) if file.endswith(".pth")]
+    files = [file for file in os.listdir(res["path"]) if file.endswith(".pth") and 'task' in file.lower()]
     #get the taskVec file
     if verbose: print(f"found {files} ")
     if len(files) == 0:

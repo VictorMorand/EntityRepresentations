@@ -119,7 +119,8 @@ def infer_entities(model,
                    return_attn_pattern: bool = False,
                    max_tokens = 20, 
                    b_size = 10, 
-                   prepend_bos:bool = True
+                   prepend_bos:bool = True,
+                   verbose: bool = True,
     ):
     """
     Infer entities from a given dataset augmented with representations.
@@ -152,7 +153,7 @@ def infer_entities(model,
     generated = []
         
     #inference loop    
-    for batch in tqdm(dataloader):
+    for batch in tqdm(dataloader, disable= not verbose):
 
         ids = batch["id"].detach().cpu().numpy()
         reps = batch["representation"].squeeze(1).cuda()
