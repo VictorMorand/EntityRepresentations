@@ -244,9 +244,8 @@ def compute_metrics(model, TaskVec, test_dataset, max_tokens=10, b_size = 5, wit
     for item in tqdm(test_dataset, disable= not verbose):
         # print(st(item).replace("', ", "'\n"))
         # prompts = item["prompt"]
-        target = item["entity"]
-        gen = item["inferred"]
-        gen_entity = gen.strip()
+        target = item["entity"].strip()
+        gen_entity = item["inferred"].strip()
         # print("gen_entity:", gen)
         # print("target:", target)
         if gen_entity == target:
@@ -278,7 +277,7 @@ def save_inferences(model_name, layer, test_dataset, fileName=None):
 
 ############# Main Task #############  
 
-LEARNER_VERSION = '1.0'
+LEARNER_VERSION = '1.1'
 
 class LearnLabelExtractor(Task):
 
@@ -376,10 +375,12 @@ class LearnLabelExtractor(Task):
             dev_dataset.augment_with_avg_repr(model, self.layer, batch_size=self.batch_size, method=extraction_method)
             logging.info("Extraction of subjects representatons Done !\n")
 
-        elif self.extraction_method == 'random_sample':
+        elif 'random_sample' in self.extraction_method: # param is like 'random_sample_10', hacky..
+            try: 
+                n = int(self.extraction_method.split("_")[-1])
+            except:
+                n = 3 #default value
             extraction_method = "in_context" #consider only this method for the moment
-            n = 3
-            #TODO, implement this for other lengths -> need to add a parameter to experiment...
             logging.info(f"BASELINE: Sampling random spans of {n} tokens in texts and extracting reps with method {extraction_method}... ")
             train_dataset = utils.sample_random_entities(model, train_dataset, n=n)
             logging.info(f"Augmenting Train set with subject representations with method {self.extraction_method}... ")
@@ -416,6 +417,7 @@ class LearnLabelExtractor(Task):
 
         logging.info(f"Begining Task Vector Training ...")
         eos_tok_str = model.tokenizer.eos_token
+        eos_tok = model.tokenizer.eos_token_id
         replace_hook_name = tl.utils.get_act_name('embed') #pos_embed for gpt2 ... 
         logging.info(f"will insert representation at hook '{replace_hook_name}'")
         train_dataloader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=True)
@@ -437,6 +439,7 @@ class LearnLabelExtractor(Task):
                 b_count += 1
                 
                 entities = batch["entity"]
+                entity_toks = batch.get("entity_tokens", None)
                 texts = batch["text"]
                 reps = batch["representation"].squeeze(1).cuda()
                 b_size = reps.shape[0]
@@ -446,17 +449,28 @@ class LearnLabelExtractor(Task):
                     entities = [toks[0] for toks in model.to_str_tokens(entities,prepend_bos=False)]
                 else:    
                     entities = [ent + eos_tok_str for ent in entities] # take whole label add eos token
+                
+                if entity_toks is not None:
+                    eos = torch.tensor([eos_tok]).repeat(b_size,1)
+                    entity_toks = torch.cat([entity_toks, eos], dim=1).cuda()
 
                 if self.with_context:
                     prompts = [txt + "_ >" for txt in texts]
                     context_toks = model.to_tokens(prompts, prepend_bos=prepend_bos, padding_side="left") 
-                    entities_toks = model.to_tokens(entities, prepend_bos=False, padding_side="right")
-                    inputs = torch.cat([context_toks, entities_toks], dim=1)
+                    if entity_toks is None:
+                        entity_toks = model.to_tokens(entities, prepend_bos=False, padding_side="right")
+                    inputs = torch.cat([context_toks, entity_toks], dim=1)
                     rep_idx = context_toks.shape[1] - 2
                 else:
                     rep_idx = 1 if prepend_bos else 0 
-                    prompts = ["_ > " + ent for ent in entities]
-                    inputs = model.to_tokens(prompts, prepend_bos=prepend_bos,)
+                    
+                    if entity_toks is not None:
+                        prompts = ["_ >" for ent in entities]
+                        inputs = model.to_tokens(prompts, prepend_bos=prepend_bos,)
+                        inputs = torch.cat([inputs, entity_toks.cuda()], dim=1)
+                    else:
+                        prompts = ["_ > " + ent for ent in entities]
+                        inputs = model.to_tokens(prompts, prepend_bos=prepend_bos,)
                 
                 rep_idxs = torch.tensor(b_size * [rep_idx])
                 taskVec_idxs = torch.tensor(b_size * [rep_idx + 1])            

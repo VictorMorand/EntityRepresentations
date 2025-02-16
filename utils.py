@@ -315,10 +315,12 @@ def sample_random_entities(model, dataset, n=3):
 
         end = np.random.randint(n+1, len(tokens)) # don't sample eos token
         toks = tokens[end-n:end]
-        entity = model.tokenizer.decode(toks)
+        entity = model.tokenizer.decode(toks).strip()
+        
         new_dataset.append( { 
             "text": row["text"],
             "entity": entity,
+            "entity_tokens": toks.cpu(), # directly store tokens instead of string
             })
     
     return EntityReprDataset(new_dataset)
