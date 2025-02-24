@@ -22,9 +22,10 @@ data_folder = ""
 
 ############################## FUNCTIONS ##############################
 
-def load_model(model_name, dtype = torch.float32):
-    """use same parameters to load models from Tlens, otherwise there are possible differences"""
-    return HookedTransformer.from_pretrained(
+def load_model(model_name, dtype = torch.float32, token=None):
+    """Use fixed parameters to load models from Tlens"""
+    try :
+        model = HookedTransformer.from_pretrained(
                                 model_name, 
                                 trust_remote_code=True, 
                                 low_cpu_mem_usage = True, 
@@ -34,6 +35,24 @@ def load_model(model_name, dtype = torch.float32):
                                 dtype=dtype,
                                 local_files_only=True,
                                 )
+    except Exception as e:
+        print(f"Error loading model {model_name}, trying to download it ...")
+        #pass hugginface in online mode
+        os.environ['HF_HUB_OFFLINE'] = '0'
+        if token : os.environ['HF_TOKEN'] = token #pass token to huggingface 
+
+        #pass token to huggingface
+        model = HookedTransformer.from_pretrained(
+                                model_name, 
+                                trust_remote_code=True, 
+                                low_cpu_mem_usage = True, 
+                                fold_ln=False,
+                                fold_value_biases=False,
+                                device_map='auto',
+                                dtype=dtype,
+                                huggingface_token=token,
+                                )
+    return model
 
 # we use the following function to truncate the computation of the transformer to a given layer
 def compute_to_layer(model, layer, tokens, verbose:bool = False):
