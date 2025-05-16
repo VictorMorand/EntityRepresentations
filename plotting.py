@@ -139,3 +139,4 @@ def plot_hist(hist, n_smooth = 20, title=""):
     fig.tight_layout()
     plt.title(title)
     plt.show()
+

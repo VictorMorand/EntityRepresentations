@@ -126,7 +126,7 @@ def get_taskVec(results, model_name, layer,
     if verbose: print(f"found {files} ")
     if len(files) == 0:
         if verbose: print("No taskVec file found")
-        return None
+        raise FileNotFoundError(f"No taskVec file found in {res['path']}")
     else:
         return res["path"] / files[0]
     
