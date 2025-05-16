@@ -1,0 +1,21 @@
+[project]
+name = "entityrepresentations"
+version = "0.1.0"
+description = "This is the repository for paper 'On the representation of entities in large language models'"
+authors = [
+    { name = "Victor Morand" }
+    ] 
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "anywidget>=0.9.18",
+    "circuitsvis>=1.43.3",
+    "evaluate>=0.4.3",
+    "experimaestro>=1.7.1",
+    "ipywidgets>=8.1.7",
+    "matplotlib>=3.10.3",
+    "notebook>=7.4.2",
+    "plotly>=6.1.0",
+    "sacrebleu>=2.5.1",
+    "transformer-lens>=2.15.4",
+]
