@@ -57,13 +57,7 @@ def run( helper: ExperimentHelper, cfg: Configuration):
                             )
                 tasks[tagspath(task)] =  task.submit(launcher=gpulauncher).jobpath
 
-    # Build a central "runs" directory to plot easily the metrics
-    runpath = helper.xp.resultspath / "runs"
-    runpath.mkdir(exist_ok=True, parents=True)
-    
-    for key, jobath in tasks.items():
-        path = (runpath / key)
-        if path.exists():
-            # remove the old symlink
-            os.remove(path)
-        path.symlink_to(jobath)
+           
+    # Wait that everything finishes
+    helper.xp.wait()    
+    logging.info("All tasks finished !")

@@ -5,6 +5,8 @@
 This is the repository for the Entity representation project. 
 Our code is based on [TransformerLens](https://github.com/TransformerLensOrg/TransformerLens/tree/main), an interpretability library that allows to harmonize various LLM hooks and loadings.
 
+![Example Entity Lens](assets/EntityLens_uncontextual.png)
+
 ## Installation
 
 ### Environment
