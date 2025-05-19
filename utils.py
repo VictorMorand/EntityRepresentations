@@ -49,7 +49,7 @@ def check_hf_cache(model_id):
         return False
 
 
-def load_llm(model_name:str, dtype=torch.float32, token=None) -> HookedTransformer:
+def load_llm(model_name: str, dtype=torch.float32, token=None) -> HookedTransformer:
     """Use fixed parameters to load models from Tlens
     Args:
         model_name: the name of the model to load
@@ -320,16 +320,16 @@ def get_avg_representation(
     return buffer  # return obtained average representation
 
 
-def project_on_vocab(model, rep, k=10):
+def project_on_vocab(model: HookedTransformer, rep: torch.Tensor, k=10):
     """project a representation on the vocabulary of the model
     Args:
         model: the model to use
-        rep: the representation to project
-        k: number of top tokens to return
+        rep (tensor): the representation to project
+        k (int): number of top tokens to return
     """
+    assert type(rep) == torch.Tensor
     W_U = model.W_U
-    dtype = W_U.dtype
-    logits = torch.tensor(rep).to(dtype).cuda() @ W_U
+    logits = rep.detach().to(W_U.dtype).cuda() @ W_U
     topk_inds = torch.topk(logits, k).indices
     topk_tokens = model.tokenizer.decode(topk_inds.cpu().numpy())
     return topk_tokens
