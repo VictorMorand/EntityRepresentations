@@ -17,11 +17,14 @@ def loadResults(xp_path):
     results = []
     for job in tqdm(jobs):
         jobPath = xp_path / job
-        job_data = {"path": jobPath,}
+        job_data = {"path": jobPath, "hash": str(job)}
+        
         with open( jobPath / "params.json") as json_file:
             params = json.load(json_file)
 
-        params = params["objects"][0]["fields"]
+        params = params["objects"][0]["fields"] 
+
+        # merge params with hash
         #add params to job_data
         job_data.update(params)
         if "with_context" not in job_data:

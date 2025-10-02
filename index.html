@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Entity Representations in Auto-regressive LLMs</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background-color: #f8f9fa;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 20px;
+        }
+
+        header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 60px 0;
+            text-align: center;
+        }
+
+        .header-content h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            font-weight: 300;
+        }
+
+        .header-content p {
+            font-size: 1.2rem;
+            opacity: 0.9;
+            margin-bottom: 30px;
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            display: inline-block;
+            padding: 12px 24px;
+            background-color: rgba(255, 255, 255, 0.2);
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+            transition: background-color 0.3s;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+        }
+
+        .btn:hover {
+            background-color: rgba(255, 255, 255, 0.3);
+        }
+
+        .btn-primary {
+            background-color: white;
+            color: #667eea;
+        }
+
+        .btn-primary:hover {
+            background-color: #f8f9fa;
+        }
+
+        nav {
+            background-color: white;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .nav-container {
+            display: flex;
+            justify-content: center;
+            padding: 15px 0;
+        }
+
+        .nav-links {
+            display: flex;
+            list-style: none;
+            gap: 30px;
+        }
+
+        .nav-links a {
+            text-decoration: none;
+            color: #333;
+            font-weight: 500;
+            transition: color 0.3s;
+        }
+
+        .nav-links a:hover {
+            color: #667eea;
+        }
+
+        main {
+            background-color: white;
+            margin: 40px 0;
+            border-radius: 10px;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.1);
+        }
+
+        section {
+            padding: 60px 0;
+            border-bottom: 1px solid #eee;
+        }
+
+        section:last-child {
+            border-bottom: none;
+        }
+
+        h2 {
+            font-size: 2rem;
+            margin-bottom: 30px;
+            color: #333;
+            text-align: center;
+        }
+
+        h3 {
+            font-size: 1.5rem;
+            margin-bottom: 20px;
+            color: #667eea;
+        }
+
+        .method-section {
+            text-align: center;
+        }
+
+        .method-image {
+            max-width: 100%;
+            height: auto;
+            border-radius: 10px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+            margin: 30px 0;
+        }
+
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 30px;
+            margin-top: 40px;
+        }
+
+        .feature-card {
+            background-color: #f8f9fa;
+            padding: 30px;
+            border-radius: 10px;
+            text-align: center;
+            transition: transform 0.3s;
+        }
+
+        .feature-card:hover {
+            transform: translateY(-5px);
+        }
+
+        .feature-icon {
+            font-size: 3rem;
+            margin-bottom: 20px;
+            color: #667eea;
+        }
+
+        pre {
+            background-color: #f8f9fa;
+            padding: 20px;
+            border-radius: 5px;
+            overflow-x: auto;
+            margin: 20px 0;
+            border-left: 4px solid #667eea;
+        }
+
+        .installation-steps {
+            margin: 30px 0;
+        }
+
+        .step {
+            display: flex;
+            align-items: flex-start;
+            margin-bottom: 20px;
+        }
+
+        .step-number {
+            background-color: #667eea;
+            color: white;
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            margin-right: 15px;
+            flex-shrink: 0;
+        }
+
+        .step-content {
+            flex: 1;
+        }
+
+        footer {
+            background-color: #333;
+            color: white;
+            text-align: center;
+            padding: 40px 0;
+        }
+
+        .footer-content {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 20px;
+        }
+
+        .social-links {
+            display: flex;
+            gap: 15px;
+        }
+
+        .social-links a {
+            color: white;
+            text-decoration: none;
+            font-size: 1.2rem;
+            transition: opacity 0.3s;
+        }
+
+        .social-links a:hover {
+            opacity: 0.7;
+        }
+
+        @media (max-width: 768px) {
+            .header-content h1 {
+                font-size: 2rem;
+            }
+
+            .nav-links {
+                flex-direction: column;
+                gap: 15px;
+                text-align: center;
+            }
+
+            .btn-group {
+                flex-direction: column;
+                align-items: center;
+            }
+
+            .footer-content {
+                flex-direction: column;
+                text-align: center;
+            }
+        }
+
+        .highlight {
+            background: linear-gradient(120deg, #a8edea 0%, #fed6e3 100%);
+            padding: 2px 6px;
+            border-radius: 3px;
+        }
+
+        .paper-info {
+            background-color: #e3f2fd;
+            padding: 20px;
+            border-radius: 10px;
+            margin: 20px 0;
+            border-left: 4px solid #2196f3;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="container">
+            <div class="header-content">
+                <h1>On the Representations of Entities in Auto-regressive Large Language Models</h1>
+                <p>A comprehensive study of entity representations in LLMs using the Entity Lens methodology</p>
+                <div class="btn-group">
+                    <a href="https://github.com/VictorMorand/EntiyRepresentations" class="btn btn-primary">View on GitHub</a>
+                    <a href="#demo" class="btn">Try Demo</a>
+                    <a href="#paper" class="btn">Read Paper</a>
+                    <a href="#installation" class="btn">Get Started</a>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <nav>
+        <div class="container">
+            <div class="nav-container">
+                <ul class="nav-links">
+                    <li><a href="#overview">Overview</a></li>
+                    <li><a href="#method">Method</a></li>
+                    <li><a href="#features">Features</a></li>
+                    <li><a href="#installation">Installation</a></li>
+                    <li><a href="#demo">Demo</a></li>
+                    <li><a href="#results">Results</a></li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <main>
+        <div class="container">
+            <section id="overview">
+                <h2>Project Overview</h2>
+                <div class="paper-info">
+                    <h3>📄 Research Paper</h3>
+                    <p>This repository contains the complete codebase for our research paper on entity representations in auto-regressive Large Language Models. Our work introduces novel methods for understanding how LLMs encode and process entity information.</p>
+                </div>
+                
+                <p>Our research is built upon <a href="https://github.com/TransformerLensOrg/TransformerLens/tree/main" target="_blank">TransformerLens</a>, an interpretability library that provides harmonized hooks and loading mechanisms for various LLM architectures.</p>
+                
+                <div style="text-align: center; margin: 40px 0;">
+                    <img src="assets/EntityLens_uncontextual.png" alt="Entity Lens Example" class="method-image" style="max-width: 600px;">
+                    <p><em>Example visualization of the Entity Lens methodology</em></p>
+                </div>
+            </section>
+
+            <section id="method">
+                <div class="method-section">
+                    <h2>Our Method: Entity Mention Reconstruction</h2>
+                    <p>We introduce a novel approach for analyzing entity representations through contextual decoding. Our method provides insights into how auto-regressive models encode entity information across different layers and contexts.</p>
+                    
+                    <div style="margin: 40px 0;">
+                        <h3>🎬 Contextual Generation Process</h3>
+                        <p>The animation below demonstrates our contextual decoding setup as described in Section 3.1 of our paper:</p>
+                        <!-- Note: You'll need to add the GIF file to your assets folder -->
+                        <img src="assets/ContextualGeneration.gif" alt="Contextual Generation Animation" class="method-image" style="max-width: 800px;">
+                    </div>
+                </div>
+            </section>
+
+            <section id="features">
+                <h2>Key Features</h2>
+                <div class="features-grid">
+                    <div class="feature-card">
+                        <div class="feature-icon">🔍</div>
+                        <h3>Entity Lens</h3>
+                        <p>Advanced visualization and analysis of entity representations across transformer layers</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon">⚡</div>
+                        <h3>TransformerLens Integration</h3>
+                        <p>Built on the robust TransformerLens library for seamless model analysis</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon">📊</div>
+                        <h3>Comprehensive Datasets</h3>
+                        <p>Includes multiple datasets for entity analysis: CoNLL2003, TACRED, WebNLG, and custom datasets</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon">🧠</div>
+                        <h3>Multi-Model Support</h3>
+                        <p>Works with various model architectures including GPT-2, Phi, Pythia, and Mistral models</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon">📈</div>
+                        <h3>Detailed Analysis</h3>
+                        <p>Provides plotting utilities and result processing for comprehensive analysis</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon">🔬</div>
+                        <h3>Interpretability Tools</h3>
+                        <p>Advanced tools for understanding entity processing in language models</p>
+                    </div>
+                </div>
+            </section>
+
+            <section id="installation">
+                <h2>Installation</h2>
+                <div class="installation-steps">
+                    <div class="step">
+                        <div class="step-number">1</div>
+                        <div class="step-content">
+                            <h3>Install PyTorch</h3>
+                            <p>This project is built on PyTorch. Install it from the <a href="https://pytorch.org/get-started/locally/" target="_blank">official website</a> based on your system configuration.</p>
+                        </div>
+                    </div>
+
+                    <div class="step">
+                        <div class="step-number">2</div>
+                        <div class="step-content">
+                            <h3>Create Virtual Environment (Optional)</h3>
+                            <p>It's recommended to create a dedicated environment for this project:</p>
+                            <pre><code>python -m venv env
+source env/bin/activate
+pip install --upgrade pip</code></pre>
+                        </div>
+                    </div>
+
+                    <div class="step">
+                        <div class="step-number">3</div>
+                        <div class="step-content">
+                            <h3>Install Dependencies</h3>
+                            <p>Install all required packages using the requirements file:</p>
+                            <pre><code>pip install -r requirements.txt</code></pre>
+                        </div>
+                    </div>
+
+                    <div class="step">
+                        <div class="step-number">4</div>
+                        <div class="step-content">
+                            <h3>Clone the Repository</h3>
+                            <pre><code>git clone https://github.com/VictorMorand/EntiyRepresentations.git
+cd EntiyRepresentations</code></pre>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section id="demo">
+                <h2>Demo & Usage</h2>
+                <div style="text-align: center;">
+                    <h3>🚀 Interactive Demo</h3>
+                    <p>Explore our Entity Lens methodology through an interactive Jupyter notebook that provides a comprehensive walkthrough of the analysis process.</p>
+                    
+                    <div style="background-color: #f0f7ff; padding: 30px; border-radius: 10px; margin: 30px 0; border-left: 4px solid #2196f3;">
+                        <h4>📓 Demo.ipynb</h4>
+                        <p>The demo notebook presents:</p>
+                        <ul style="text-align: left; max-width: 600px; margin: 20px auto;">
+                            <li>Step-by-step walkthrough of the Entity Lens methodology</li>
+                            <li>Interactive visualizations of entity representations</li>
+                            <li>Real-time analysis of different model architectures</li>
+                            <li>Contextual vs. non-contextual comparison studies</li>
+                        </ul>
+                    </div>
+
+                    <a href="Notebooks/Demo.ipynb" class="btn btn-primary" style="display: inline-block; margin: 20px;">Open Demo Notebook</a>
+                </div>
+            </section>
+
+            <section id="results">
+                <h2>Repository Structure</h2>
+                <p>Our codebase is organized into several key components:</p>
+                
+                <div class="features-grid">
+                    <div class="feature-card">
+                        <h3>📁 Core Scripts</h3>
+                        <ul style="text-align: left;">
+                            <li><code>LabelExtractor.py</code> - Entity label extraction</li>
+                            <li><code>plotting.py</code> - Visualization utilities</li>
+                            <li><code>processResults.py</code> - Result analysis</li>
+                            <li><code>utils.py</code> - Helper functions</li>
+                        </ul>
+                    </div>
+                    <div class="feature-card">
+                        <h3>💾 Checkpoints</h3>
+                        <p>Pre-trained models and saved states for various architectures including GPT-2, Phi, Pythia, and Mistral models across different layers and epochs.</p>
+                    </div>
+                    <div class="feature-card">
+                        <h3>📊 Datasets</h3>
+                        <p>Curated datasets for entity analysis including CoNLL2003, TACRED, WebNLG, and custom relation datasets for comprehensive evaluation.</p>
+                    </div>
+                    <div class="feature-card">
+                        <h3>🔬 Experiments</h3>
+                        <p>Complete experimental setups and configurations used in our research, enabling full reproducibility of results.</p>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <footer>
+        <div class="container">
+            <div class="footer-content">
+                <div>
+                    <p>&copy; 2024 Entity Representations Research. Built with ❤️ for the NLP community.</p>
+                </div>
+                <div class="social-links">
+                    <a href="https://github.com/VictorMorand/EntiyRepresentations" target="_blank">GitHub</a>
+                    <a href="#paper" target="_blank">Paper</a>
+                    <a href="mailto:victor@example.com">Contact</a>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-core.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/autoloader/prism-autoloader.min.js"></script>
+    <script>
+        // Smooth scrolling for navigation links
+        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+            anchor.addEventListener('click', function (e) {
+                e.preventDefault();
+                const target = document.querySelector(this.getAttribute('href'));
+                if (target) {
+                    target.scrollIntoView({
+                        behavior: 'smooth',
+                        block: 'start'
+                    });
+                }
+            });
+        });
+
+        // Add active state to navigation links
+        window.addEventListener('scroll', () => {
+            const sections = document.querySelectorAll('section');
+            const navLinks = document.querySelectorAll('.nav-links a');
+            
+            let currentSection = '';
+            sections.forEach(section => {
+                const sectionTop = section.offsetTop - 100;
+                if (scrollY >= sectionTop) {
+                    currentSection = section.getAttribute('id');
+                }
+            });
+
+            navLinks.forEach(link => {
+                link.classList.remove('active');
+                if (link.getAttribute('href').substring(1) === currentSection) {
+                    link.classList.add('active');
+                }
+            });
+        });
+    </script>
+
+    <style>
+        .nav-links a.active {
+            color: #667eea;
+            font-weight: 600;
+        }
+    </style>
+</body>
+</html>

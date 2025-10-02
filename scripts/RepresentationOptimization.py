@@ -14,7 +14,6 @@ from tqdm import tqdm
 
 #our own code
 import utils
-from LabelExtractor import eval_model, compute_metrics, infer_entities
 from processResults import *
 
 # Load a model (eg GPT-2 Small)

@@ -53,7 +53,7 @@ def run( helper: ExperimentHelper, cfg: Configuration):
         logging.info(f"got  {len(filtered_results)} with config: {cfg}")
         
         if len(filtered_results) == 0:
-            print(f"No results for {model}, {cfg.dataset_name}, {cfg.with_context}, {cfg.method}")
+            print(f"No results for {model}, {cfg.dataset_name}, {cfg.with_context}, {cfg.extraction_method}")
             continue
         
         ################################################

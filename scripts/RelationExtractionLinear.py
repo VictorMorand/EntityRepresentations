@@ -18,7 +18,7 @@ from utils import EntityReprDataset
 from LabelExtractor import eval_model, infer_entities
 from processResults import *
 from processResults import get_taskVec
-from LabelExtractor import compute_metrics
+from LabelExtractor import evaluateTV
 
 ################################################################### 
 ###############    UTILS   ######################################## 
@@ -338,7 +338,7 @@ for layer in range(model.cfg.n_layers):
             } for i, item in enumerate(test_dataset)#+ train_dataset)
             ]
 
-    metrics = compute_metrics(model, 
+    metrics = evaluateTV(model, 
                             TaskVec, 
                             obj_from_subj,
                             with_context=with_context,

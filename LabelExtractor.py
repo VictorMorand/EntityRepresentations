@@ -1,6 +1,7 @@
 ### Author: Victor Morand
 ### this experiment script
 
+from tabnanny import verbose
 from typing import List, Optional
 import logging
 import torch, gc, json, os
@@ -182,7 +183,6 @@ def infer_entities(
     dataloader = DataLoader(dataset, batch_size=b_size, shuffle=True)
     eos_tok = model.tokenizer.eos_token_id
     eos_tok_str = model.tokenizer.eos_token
-    generated = []
 
     # inference loop
     for batch in tqdm(dataloader, disable=not verbose):
@@ -213,7 +213,7 @@ def infer_entities(
             (
                 replace_hook_name,
                 utils.get_replace_with_rep_hook(b_taskVec, taskVec_idxs),
-            ),  # replace 'called' by TaskVec Representation
+            ),  # replace '>' by TaskVec Representation
         ]
         # inference
         for i in range(max_tokens):
@@ -267,15 +267,126 @@ def infer_entities(
     return
 
 
+
+@torch.no_grad()
+def infer_entities_icl(
+    model,
+    dataset,
+    n_examples: int = 3,
+    with_context: bool = False,
+    max_tokens=20,
+    b_size=10,
+    prepend_bos: bool = True,
+    verbose: bool = True,
+):
+    """
+    Infer entities from a given dataset augmented with representations using ICL (as PatchScopes)
+    Will write the inferred entities back to the dataset in the 'inferred' field.
+    Args:
+        model: the model to use
+        n_examples: the number of examples to use in the prompt
+        dataset: the dataset to infer entities from,
+            must have a 'representation' key that stores the entity representation to generate from.
+            must contain 'text' key for context
+        with_context : bool : if True, the context is prepended to the entity
+        max_tokens: the maximum number of tokens to generate
+        b_size: the batch size to use when inferring on a bug dataset
+        prepend_bos: whether to prepend the BOS token to the input
+    Returns:
+        The augmented dataset with inferred entities
+    """
+
+    # inp_toks = model.to_tokens(, prepend_bos=prepend_bos)
+    replace_hook_name = tl.utils.get_act_name("embed")
+    dataloader = DataLoader(dataset, batch_size=b_size, shuffle=True)
+    eos_tok = model.tokenizer.eos_token_id
+    eos_tok_str = model.tokenizer.eos_token
+    sep_tok = ";"
+    
+    #tokenize it
+    sep_tok_id = model.tokenizer.get_vocab()[sep_tok]
+
+    # create in-context learning prompt
+    icl_prompt = sep_tok.join([f"{ent['entity']}>{ent['entity']}" for ent in dataset[:n_examples]])
+    prompt = icl_prompt + sep_tok + "_ >"
+    print(f"ICL prompt: '{prompt}'")
+    
+    # inference loop
+    for batch in tqdm(dataloader, disable=not verbose):
+
+        ids = batch["id"].detach().cpu().numpy()
+        reps = batch["representation"].squeeze(1).cuda()
+        b_size = reps.shape[0]
+
+        if with_context:
+            raise NotImplementedError("ICL with_context not Implemented yet")
+        else:
+            prompts = [prompt for _ in reps]
+
+        inputs = model.to_tokens(
+            prompts, prepend_bos=prepend_bos, padding_side="left"
+        )
+        rep_idx = inputs.shape[1] - 2
+        taskVec_idx = rep_idx + 1
+        rep_idxs = torch.tensor(b_size * [rep_idx])
+        taskVec_idxs = torch.tensor(b_size * [taskVec_idx])
+        fwd_hooks = [
+            (
+                replace_hook_name,
+                utils.get_replace_with_rep_hook(reps, rep_idxs),
+            ),  # replace '_' by the subject Representation
+        ]
+
+        # inference: greedy decoding / Temperature 0
+        gen_toks = torch.zeros((b_size, 0), dtype=torch.long).cuda()
+
+        for i in range(max_tokens):
+            # print(inputs, targets)
+            inp_toks = torch.hstack((inputs, gen_toks))
+            logits = model.run_with_hooks(
+                inp_toks,
+                return_type="logits",
+                fwd_hooks=fwd_hooks,
+            )
+
+            final_logits = logits[:, -1, :]  # extract logits for last token only
+            new_toks = final_logits.argmax(-1).view(-1, 1)
+            gen_toks = torch.hstack((gen_toks, new_toks))
+            
+            # check if we have reached the end of the sequence or sep token is in all generated mentions
+            # print(gen_toks, sep_tok_id)
+            # print(gen_toks.shape)
+            n_done = (
+                (gen_toks == sep_tok_id).int().sum(dim=-1) > 0
+                ).int().sum(dim=-1).item()
+            # print(n_done)
+
+            if all(new_toks == eos_tok) or n_done == b_size:
+                break
+
+        for i in range(b_size):
+            gen = model.tokenizer.decode(inp_toks[i, taskVec_idxs[i] + 1 :].view(-1))
+            # gen = "".join(gen).split(eos_tok_str)[0].strip()
+            gen = gen.split(eos_tok_str)[0].split(sep_tok)[0].strip()
+
+            # store the inferred entity
+            dataset[ids[i]]["inferred"] = gen
+            # print(f"Context: '{dataset[ids[i]]['text']}'\nOriginal: {dataset[ids[i]]['entity']}\nInferred: {dataset[ids[i]]['inferred']}\n{'-'*80}")
+        
+
+    return dataset
+
+
+
 METRIC_VERSION = 1.2
 evalFileName = f"Evaluation_{METRIC_VERSION}.json"
 
 
-def compute_metrics(
+def evaluateTV(
     model,
     TaskVec,
     test_dataset,
-    max_tokens=10,
+    max_tokens=20,
     b_size=5,
     with_context=True,
     prepend_bos=True,
@@ -283,10 +394,8 @@ def compute_metrics(
     verbose=True,
 ):
     """
-    Evaluate the model on a given test_set augmented with representations.
+    Evaluate the Task Vector and model on a given test_set augmented with representations.
     """
-    perfect_acc = 0
-    partial_acc = 0
 
     if force_recompute or (not "inferred" in test_dataset[0]):
         infer_entities(
@@ -298,6 +407,20 @@ def compute_metrics(
             with_context=with_context,
             prepend_bos=prepend_bos,
         )
+    else:
+        logging.info("Inferred entities already present, skipping inference.")
+
+    return compute_metrics(test_dataset)
+
+
+def compute_metrics(test_dataset) -> dict:
+    """Compute Metrics for given test dataset containing inferred entities
+    Args:
+        test_dataset: The dataset to compute metrics on
+
+    """
+    perfect_acc = 0
+    partial_acc = 0
 
     for item in tqdm(test_dataset, disable=not verbose):
         # print(st(item).replace("', ", "'\n"))
@@ -350,10 +473,10 @@ class LearnLabelExtractor(Task):
     dataset_name: Param[str]
     layer: Param[int]
     with_context: Param[bool] = False
-    extraction_method: Param[
-        str
-    ]  # Can be either 'in_context' 'after_context' 'raw_entity' OR 'average' for baseline
+    extraction_method: Param[str]
+    """Can be either 'in_context' 'after_context' 'raw_entity' OR 'average' for baseline"""
     first_token_only: bool = False
+    max_dev_length: Param[int] = 2000
     max_ent_length: Param[int] = 20
     max_length: Param[int] = 200
     epochs: Param[int] = 5
@@ -361,9 +484,8 @@ class LearnLabelExtractor(Task):
     lr: Param[float] = 1e-2
     batch_size: Param[int] = 64
     run: Param[int] = 0
-    version: Constant[str] = (
-        LEARNER_VERSION  # Can change if code has been updated and need to recompute
-    )
+    # Can change if code has been updated and need to recompute
+    version: Constant[str] = LEARNER_VERSION
 
     def execute(self):
         """Called when this task is run"""
@@ -388,76 +510,16 @@ class LearnLabelExtractor(Task):
         ################ DATA  ################
         logging.info(f"loading data from {self.dataset_name} ...")
 
-        max_dev_length = 2000
-
-        if self.dataset_name.lower() == "webnlg":
-            dataset = load_dataset("web_nlg", "release_v3.0_en", trust_remote_code=True)
-
-            # optionnal, filter categories from datset
-            cat = ["Food"]  # WebNLG Categories to remove
-            # cat = None
-            if cat:
-                dataset["train"] = [
-                    item for item in dataset["train"] if item["category"] not in cat
-                ]
-                dataset["dev"] = [
-                    item for item in dataset["dev"] if item["category"] not in cat
-                ]
-                dataset["test"] = [
-                    item for item in dataset["test"] if item["category"] not in cat
-                ]
-
-            # Create dataset instances
-            train_dataset = utils.WebNLGDataset(
-                dataset["train"], max_ent_length=self.max_ent_length
-            )
-            dev_dataset = utils.WebNLGDataset(
-                dataset["dev"], max_ent_length=self.max_ent_length
-            )
-            test_dataset = utils.WebNLGDataset(
-                dataset["test"], max_ent_length=self.max_ent_length
-            )
-
-        elif self.dataset_name.lower() == "tacred":
-            dataset = load_dataset("AmirLayegh/tacred_text_label")
-            train_dataset = utils.TacredDataset(
-                dataset["train"], max_ent_length=self.max_ent_length, max_length=200
-            )
-            dev_dataset = utils.TacredDataset(
-                dataset["test"], max_ent_length=self.max_ent_length, max_length=200
-            )
-            test_dataset = utils.TacredDataset(
-                dataset["validation"],
-                max_ent_length=self.max_ent_length,
-                max_length=200,
-            )
-
-        elif self.dataset_name.lower() == "conll2003":
-            ds = load_dataset("eriktks/conll2003", trust_remote_code=True)
-            max_ent_length = 60
-            max_length = 300
-            train_dataset = utils.CoNLLDataset(
-                ds["train"], max_ent_length=max_ent_length, max_length=max_length
-            )
-            dev_dataset = utils.CoNLLDataset(
-                ds["validation"], max_ent_length=max_ent_length, max_length=max_length
-            )
-            test_dataset = utils.CoNLLDataset(
-                ds["test"], max_ent_length=max_ent_length, max_length=max_length
-            )
-
-        else:
-            # unknown Dataset
-            raise NotImplementedError(
-                "Unknown dataset, can be: 'webnlg' 'tacred' or 'CoNLL2003' "
-            )
-
+        train_dataset, test_dataset, dev_dataset = utils.load_datasets(
+            self.dataset_name,
+            max_ent_length=self.max_ent_length,
+        )
         # limit the number of samples for testing
         logging.info(
-            f"initial dev dataset size: {len(dev_dataset.data)}, truncating to {max_dev_length}"
+            f"initial dev dataset size: {len(dev_dataset.data)}, truncating to {self.max_dev_length}"
         )
         dev_dataset.data = list(
-            np.random.choice(dev_dataset.data, max_dev_length, replace=False)
+            np.random.choice(dev_dataset.data, self.max_dev_length, replace=False)
         )
 
         logging.info("loading dataset done !")
@@ -490,9 +552,8 @@ class LearnLabelExtractor(Task):
             )
             logging.info("Extraction of subjects representatons Done !\n")
 
-        elif (
-            "random_sample" in self.extraction_method
-        ):  # param is like 'random_sample_10', hacky..
+        elif "random_sample" in self.extraction_method:
+            # param is like 'random_sample_10', hacky..
             try:
                 n = int(self.extraction_method.split("_")[-1])
             except:
@@ -707,7 +768,7 @@ class LearnLabelExtractor(Task):
 
         # Evaluation stage
         logging.info(f"Evaluation on Test Set...")
-        metrics = compute_metrics(
+        metrics = evaluateTV(
             model,
             TaskVec,
             test_dataset,
@@ -972,7 +1033,7 @@ class LearnLinearFilter(Task):
             )
 
         # Compute metricss
-        metrics = compute_metrics(
+        metrics = evaluateTV(
             model,
             TaskVec,
             test_dataset,
@@ -1002,13 +1063,14 @@ class EvalLabelExtractor(Task):
 
     job_path: Param[str]
     TaskVec_path: Param[str]
+    TaskVecLayer: Param[int]
     model_name: Param[str]
     dataset_name: Param[str]
     layer: Param[int]
     with_context: Param[bool] = False
-    extraction_method: Param[str]
-    max_ent_length: Param[int] = 20
-    max_length: Param[int] = 200
+    extraction_method: Param[str] = "in_context"
+    max_ent_length: Param[int] = 60
+    max_length: Param[int] = 300
     batch_size: Param[int] = 64
     metrics_v: Constant[float] = METRIC_VERSION
 
@@ -1016,7 +1078,11 @@ class EvalLabelExtractor(Task):
         """Perform Evaluation of a previously trained TaskVec"""
 
         # change working dir
-        os.chdir(self.job_path)
+        # os.chdir(self.job_path)
+
+        evalFileName = (
+            f"Evaluation_{self.metrics_v}_TV{self.TaskVecLayer}_l{self.layer}.json"
+        )
 
         # check if evaluation has already been done or not:
         if (Path(self.job_path) / evalFileName).exists():
@@ -1029,17 +1095,8 @@ class EvalLabelExtractor(Task):
 
         # Load Model
         logging.info(f"loading model {self.model_name} ...")
-        model = HookedTransformer.from_pretrained(
-            self.model_name,
-            trust_remote_code=True,
-            low_cpu_mem_usage=True,
-            device_map="auto",
-            move_to_device=False,
-            fold_ln=False,
-            fold_value_biases=False,
-            center_writing_weights=False,
-            center_unembed=False,
-        )
+
+        model = utils.load_llm(self.model_name)
         model.eval()
         model = model.cuda()
 
@@ -1049,37 +1106,16 @@ class EvalLabelExtractor(Task):
 
         # Load Data
         logging.info(f"loading data from {self.dataset_name} ...")
-        if self.dataset_name.lower() == "webnlg":
-            dataset = load_dataset("web_nlg", "release_v3.0_en", trust_remote_code=True)
 
-            # optionnal, filter categories from datset
-            cat = ["Food"]  # WebNLG Categories to remove
-            # cat = None
-            if cat:
-                dataset["test"] = [
-                    item for item in dataset["test"] if item["category"] not in cat
-                ]
+        _, test_dataset, _ = utils.load_datasets(
+            self.dataset_name,
+            max_ent_length=self.max_ent_length,
+            max_length=self.max_length,
+        )
 
-            # Create dataset instances
-            test_dataset = utils.WebNLGDataset(
-                dataset["test"],
-                max_ent_length=self.max_ent_length,
-                max_length=self.max_length,
-            )
-
-        elif self.dataset_name.lower() == "tacred":
-            dataset = load_dataset("AmirLayegh/tacred_text_label")
-            test_dataset = utils.TacredDataset(
-                dataset["validation"],
-                max_ent_length=self.max_ent_length,
-                max_length=self.max_length,
-            )
-        else:
-            # unknown Dataset
-            raise NotImplementedError(
-                "dataset Name must be either 'webnlg' or 'tacred'"
-            )
-
+        logging.info(
+            f"{len(test_dataset)} samples loaded from {self.dataset_name} test set."
+        )
         # augment test set with representations
         logging.info(
             f"augmenting test dataset with representations from layer {self.layer}"
@@ -1087,13 +1123,78 @@ class EvalLabelExtractor(Task):
         test_dataset.augment_with_repr(model, self.layer, batch_size=self.batch_size)
 
         # Compute metricss
-        metrics = compute_metrics(
+        metrics = evaluateTV(
             model,
             TaskVec,
             test_dataset,
             b_size=self.batch_size,
             with_context=self.with_context,
         )
+        logging.info(metrics)
+
+        # save inferences
+        save_inferences(self.model_name, self.layer, test_dataset)
+
+        # save computed metrics
+        with open(evalFileName, "w") as fp:
+            json.dump(metrics, fp)
+
+
+class EvalICLLabelExtractor(Task):
+
+    model_name: Param[str]
+    dataset_name: Param[str]
+    layer: Param[int]
+    n_icl_examples: Param[int] = 3
+    with_context: Param[bool] = False
+    extraction_method: Param[str] = "in_context"
+    max_ent_length: Param[int] = 60
+    max_length: Param[int] = 300
+    batch_size: Param[int] = 64
+    metrics_v: Constant[float] = METRIC_VERSION
+
+    def execute(self):
+        """Perform Evaluation of a previously trained TaskVec"""
+
+        evalFileName = (
+            f"Evaluation_{self.metrics_v}_ICL({self.n_icl_examples})_l{self.layer}.json"
+        )
+
+        # Load Model
+        logging.info(f"loading model {self.model_name} ...")
+
+        model = utils.load_llm(self.model_name)
+        model.eval()
+        model = model.cuda()
+
+        # Load Data
+        logging.info(f"loading data from {self.dataset_name} ...")
+
+        _, test_dataset, _ = utils.load_datasets(
+            self.dataset_name,
+            max_ent_length=self.max_ent_length,
+            max_length=self.max_length,
+        )
+
+        logging.info(
+            f"{len(test_dataset)} samples loaded from {self.dataset_name} test set."
+        )
+        # augment test set with representations
+        logging.info(
+            f"augmenting test dataset with representations from layer {self.layer}"
+        )
+        test_dataset.augment_with_repr(model, self.layer, batch_size=self.batch_size)
+
+        # Compute metrics
+        metrics = compute_metrics(
+            infer_entities_icl(
+                model,
+                test_dataset,
+                b_size=self.batch_size,
+                with_context=self.with_context,
+            )
+        )
+
         logging.info(metrics)
 
         # save inferences

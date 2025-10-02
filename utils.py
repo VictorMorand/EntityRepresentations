@@ -14,6 +14,8 @@ import torch, os, gc, re
 
 os.environ["HF_EVALUATE_OFFLINE"] = "1"
 os.environ["HF_DATASETS_OFFLINE"] = "1"
+os.environ["HF_HUB_OFFLINE"] = "1"
+
 from torch.utils.data import DataLoader, Dataset
 import torch.nn as nn
 from tqdm import tqdm
