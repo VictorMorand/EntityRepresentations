@@ -1,9 +1,341 @@
 import plotly.graph_objects as go
 import plotly.colors as pc
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
+from transformer_lens import HookedTransformer
+import transformer_lens as tl
+import torch, gc, os
+import plotly.graph_objects as go
+from datetime import datetime
+from processResults import get_taskVec
+from LabelExtractor import infer_entities
+import utils
 
 ### ENTITY LENS PLOTTING ###
+
+
+def EntityLens(
+    model: HookedTransformer,
+    results:pd.DataFrame,
+    layers: list,
+    prompt: str = "The City of Lights iconic landmark",
+    with_context: bool = False,
+    use_TV_layer: bool = None,
+    verbose: bool = False,
+    compute_logit_lens: bool = False,
+    output: str = "fancy",
+    plot_size: tuple = (600, 5000),
+):
+    """
+    Compute the Entity Lens for a given model and prompt.
+    Args:
+        model (HookedTransformer): The model to use.
+        results (pd.DataFrame): dataframe containing the provided results.
+        layers (list): The layers to use.
+        prompt (str): The prompt to use.
+        with_context (bool): Whether to use context or not.
+        use_TV_layer (int): what Task Vector to use.
+            - default is None: use the TV from each layer,
+            - if int, use the TV from that layer for all layers.
+        use_filter (bool): Whether to use the linear filter or not.
+        verbose (bool): Whether to print verbose output or not.
+        compute_logit_lens (bool): Whether to compute the logit lens or not.
+        output (str): The output format. Can be
+            - "fancy": fancy table using plotly
+            - "markdown": markdown table
+            - "csv": csv file
+    """
+    if verbose:
+        print(
+            f"Computing {'contextual' if with_context else 'uncontextual'} Entity Lens at layers {layers} of {model.cfg.model_name}"
+        )
+
+    str_tokens = model.to_str_tokens(prompt)
+    tok_ids = range(1, len(str_tokens))  # skip the first token
+    str_tokens = [str_tokens[t] for t in tok_ids]
+    dtype = model.W_E.dtype
+    model_name = model.cfg.model_name
+
+    # get whole cache
+    with torch.no_grad():
+        _, cache = model.run_with_cache(prompt)
+        reprs = []
+        for layer in layers:
+            if layer == -1:
+                hook = tl.utils.get_act_name("embed")
+            else:
+                hook = tl.utils.get_act_name("resid_post", layer, "")
+            reprs.append(cache[hook].detach().cpu())  # 1 x n_tokens x dim
+        del cache
+        gc.collect()
+        torch.cuda.empty_cache()
+
+    def get_TV(layer, dtype=torch.float32):
+        # This function is assumed to be defined elsewhere in your code
+        fileName = get_taskVec(
+            results,
+            model_name,
+            layer=layer,
+            with_context=with_context,
+            verbose=False,
+        )
+        if verbose:
+            print(f" layer {layer}, TaskVec loaded from {fileName}")
+        TaskVec = torch.load(fileName, weights_only=True).to(dtype)
+        return TaskVec
+
+    if use_TV_layer is not None:
+        TaskVec = get_TV(use_TV_layer, dtype=dtype)
+        if verbose:
+            print(f"Using TaskVec from layer {use_TV_layer}")
+    else:
+        if verbose:
+            print("will load TaskVec from every layer")
+
+    if verbose:
+        print(
+            f"infering entities from all tokens in prompt with{'' if with_context else 'out'} context..."
+        )
+    
+    
+    data = []
+    for i, l in enumerate(layers):
+        if use_TV_layer is None:
+            TaskVec = get_TV(l, dtype=dtype)
+
+        data_l = [
+            {"representation": reprs[i][0, t, :], "layer": l, "text": prompt}
+            for t in tok_ids
+        ]
+
+        for i, d in enumerate(data_l):
+            d["id"] = i
+
+        infer_entities(
+            model,
+            TaskVec,
+            data_l,
+            with_context=with_context,
+            max_tokens=8,
+            b_size=5,
+            verbose=False,
+        )
+
+        if compute_logit_lens:
+            for row in data_l:
+                # This function is assumed to be defined elsewhere in your code
+                row["logitLens"] = utils.project_on_vocab(model, row["representation"], k = 1)
+        
+        data += data_l
+
+    def format_cell_data(d, for_html=False):
+        """Helper function to format cell data based on output type"""
+        if for_html:
+            # HTML formatting with styling
+            cell_text = f"<b style='font-size: 13px; color: #2c3e50;'>{d['inferred']}</b>"
+            if compute_logit_lens and "logitLens" in d:
+                logit_lens_text = d['logitLens'].strip().replace(' ', '&nbsp;')
+                cell_text += f"<br><span style='color:#7f8c8d; font-size:10px; font-style:italic;'>'{logit_lens_text}'</span>"
+            return cell_text
+        else:
+            # Plain text formatting for markdown/console output
+            text = d['inferred']
+            if compute_logit_lens and "logitLens" in d:
+                logit_lens_text = d['logitLens'].strip()
+                text += f" (ll: '{logit_lens_text}')"
+            return text
+    
+    strings = []
+    
+    # Generate string data based on output format
+    for l in layers:
+        layer_data = [d for d in data if d["layer"] == l]
+        if output == "html":
+            # Use HTML formatting
+            row_strings = [format_cell_data(d, for_html=True) for d in layer_data]
+        else:
+            # Use plain text formatting
+            row_strings = [format_cell_data(d, for_html=False) for d in layer_data]
+        strings.append(row_strings)
+
+    row_headers = [f"{l+1}" for l in layers]
+    if layers and layers[0] == -1:
+        row_headers[0] = "Emb"
+
+    if output == "markdown":
+        print()
+        print(f"Entity Lens for {model.cfg.model_name}")
+        width = 30
+        sep = ";"
+        print()
+        print("-" * (width + 1) * (len(str_tokens) + 1))
+        print(sep.join([tok.center(width) for tok in ["token"] + str_tokens]))
+        print("-" * (width + 1) * (len(str_tokens) + 1))
+        for i, row in enumerate(strings):
+            # Clean markdown output without HTML tags
+            print(sep.join([it.center(width) for it in row_headers[i : i + 1] + row]))
+        print("-" * (width + 1) * (len(str_tokens) + 1))
+
+    elif output == "fancy":
+        # MODIFICATION 2: Enhance the Plotly table presentation
+        header = ["Layer"] + str_tokens
+        cells = [[row] + data for row, data in zip(row_headers, strings)]
+        columns = list(map(list, zip(*cells)))
+
+        size = 50
+        h, w = plot_size
+
+        # Create a more visually appealing header
+        header_style = dict(
+            values=header,
+            fill_color="#1f77b4",  # A professional blue
+            align="center",
+            font=dict(size=size + 5, family="Arial, sans-serif", color="white"),
+            height=int(1.6 * size),
+        )
+
+        # Style the cells with alternating row colors for readability
+        cell_style = dict(
+            values=columns,
+            fill_color=[['#f2f2f2', 'white'] * (len(columns[0]) // 2 + 1)],
+            line_color="darkgray",
+            align="center",
+            font=dict(size=size, family="Arial, sans-serif"),
+            height=int(1.7 * size), # Increased height to accommodate two lines
+        )
+
+        fig = go.Figure(
+            data=[
+                go.Table(
+                    columnwidth=[10] + [50] * len(str_tokens),
+                    header=header_style,
+                    cells=cell_style,
+                )
+            ]
+        )
+        
+        # Add a title and refine the layout for a polished look
+        fig.update_layout(
+            title_text=f"<b>Entity Lens Analysis</b><br><i>Prompt: '{prompt}'</i>",
+            title_x=0.5,
+            margin=dict(t=120, b=20, l=20, r=20), # Increased top margin for title
+            height=h,
+            width=w,
+        )
+        fig.show()
+        
+    elif output == "html":
+        # MODIFICATION 3: Create a beautiful HTML table
+        from IPython.display import HTML, display
+        
+        # Create HTML table - compact design for paper publication
+        html = f"""
+        <div style="font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif; margin: 5px; font-size: 14px;">
+            <h3 style="text-align: center; color: #2c3e50; margin-bottom: 5px; font-size: 18px; font-weight: 600;">Entity Lens Analysis</h3>
+            <p style="text-align: center; color: #555; font-style: italic; margin-bottom: 8px; font-size: 12px;">Prompt: "{prompt}"</p>
+            
+            <table style="border-collapse: collapse; width: auto; margin: 0 auto; border: 2px solid #2c3e50; font-size: 13px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); table-layout: auto;">
+                <thead>
+                    <tr style="background-color: #3498db; color: white;">
+                        <th style="padding: 3px 5px; border: 1px solid #2c3e50; font-weight: 600; text-align: center; width: 60px; font-size: 13px;">Layer</th>
+        """
+        
+        # Calculate optimal column widths based on content
+        column_widths = []
+        for i, token in enumerate(str_tokens):
+            # Start with token header length
+            max_length = len(token)
+            
+            # Check content in each row for this column
+            for row_data in strings:
+                if i < len(row_data):
+                    # Remove HTML tags and calculate text length
+                    clean_text = row_data[i].replace('<b>', '').replace('</b>', '').replace('<br>', ' ').replace('<span>', '').replace('</span>', '')
+                    # Split by spaces and take the longest part for width calculation
+                    words = clean_text.split()
+                    if words:
+                        max_word = max(words, key=len)
+                        max_length = max(max_length, len(max_word))
+            
+            # Calculate width: base width + character width, with tighter limits
+            width = max(50, min(150, max_length * 7 + 15))
+            column_widths.append(width)
+        
+        # Add token headers with calculated widths
+        for i, token in enumerate(str_tokens):
+            html += f'<th style="padding: 3px 4px; border: 1px solid #2c3e50; font-weight: 600; text-align: center; width: {column_widths[i]}px; font-size: 13px;">{token}</th>'
+        
+        html += """
+                    </tr>
+                </thead>
+                <tbody>
+        """
+        
+        # Add data rows
+        for i, (row_header, row_data) in enumerate(zip(row_headers, strings)):
+            row_color = "#f8f9fa" if i % 2 == 0 else "#ffffff"
+            html += f'<tr style="background-color: {row_color};">'
+            html += f'<td style="padding: 3px 5px; border: 1px solid #2c3e50; text-align: center; font-weight: 600; background-color: #e8f4fd; color: #2c3e50; font-size: 13px;">{row_header}</td>'
+            
+            for cell_data in row_data:
+                html += f'<td style="padding: 2px 4px; border: 1px solid #2c3e50; text-align: center; vertical-align: middle; line-height: 1.2; color: #2c3e50; font-size: 11px;">{cell_data}</td>'
+            
+            html += '</tr>'
+        
+        html += """
+                </tbody>
+            </table>
+        </div>
+        """
+        
+        display(HTML(html))
+        
+        # Save HTML to file for printing
+        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"entity_lens_{model.cfg.model_name.replace('/', '_')}_{timestamp}.html"
+        
+        # Create a complete HTML document for standalone viewing/printing
+        complete_html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Entity Lens Analysis</title>
+    <style>
+        @media print {{
+            body {{ margin: 0; }}
+            .no-print {{ display: none; }}
+        }}
+        body {{
+            font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+            margin: 20px;
+            background: white;
+        }}
+    </style>
+</head>
+<body>
+    {html.replace('<div style="font-family:', '<div class="entity-table" style="font-family:')}
+    <div class="no-print" style="margin-top: 20px; text-align: center;">
+        <p style="color: #666; font-size: 12px; margin-top: 10px;">
+            Generated on {datetime.now().strftime("%Y-%m-%d %H:%M:%S")} | Model: {model.cfg.model_name}
+        </p>
+    </div>
+</body>
+</html>"""
+        
+        # Save to file
+        with open(filename, 'w', encoding='utf-8') as f:
+            f.write(complete_html)
+        
+        print(f"✅ HTML table saved to: {filename}")
+        print(f"📄 You can open this file in a browser and print it directly.")
+        
+    else :
+        print("Invalid output format. Choose from 'fancy', 'markdown', or 'html'. Ignoring output.")
+    
+    return data
 
 def create_colored_table(
             strings, 
