@@ -1,5 +1,5 @@
 # On the Representations of Entities in Auto-regressive Large Language Models
-### [🎓 arxiV]()
+### [🎓 arxiV](https://arxiv.org/abs/2510.09421)
 
 This repository contains the codebase for the paper _"On the Representations of Entities in Auto-regressive Large Language Models"_. 
 
