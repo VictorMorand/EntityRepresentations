@@ -73,5 +73,18 @@ Once experimaestro is setup, you can run the experiments with
 (uv run) experimaestro run-experiment experiments/no_context.yaml 
 ```
 
-Feel free to leave an issue if you have any problem using our code.
+## Citation 
+If you find our work useful, please cite it as: 
 
+```yaml
+@misc{morand2025representationsentitiesautoregressivelarge,
+      title={On the Representations of Entities in Auto-regressive Large Language Models}, 
+      author={Victor Morand and Josiane Mothe and Benjamin Piwowarski},
+      year={2025},
+      eprint={2510.09421},
+      archivePrefix={arXiv},
+      primaryClass={cs.CL},
+      url={https://arxiv.org/abs/2510.09421}, 
+}
+```
+Feel free to leave an issue if you have any problem using our code.
